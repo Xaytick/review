@@ -1,0 +1,3 @@
+[submodule "api/review/v1"]
+	path = api/review/v1
+	url = https://github.com/Xaytick/review-api.git

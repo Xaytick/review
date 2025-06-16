@@ -1,0 +1,18 @@
+server:
+  http:
+    addr: 0.0.0.0:8008
+    timeout: 1s
+  grpc:
+    addr: 0.0.0.0:9009
+    timeout: 1s
+data:
+  database:
+    driver: mysql
+    source: root:20020130@tcp(127.0.0.1:3307)/reviewdb?parseTime=True&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+  redis:
+    addr: 127.0.0.1:6380
+    read_timeout: 0.2s
+    write_timeout: 0.2s
+snowflake:
+  start_time: "2025-06-13"
+  machine_id: 1
