@@ -14,3 +14,17 @@ services:
       MYSQL_ROOT_PASSWORD: 20020130
       MYSQL_DATABASE: reviewdb
     container_name: review-mysql
+
+  review-consul:
+    image: consul:1.15.3
+    ports:
+      - "8500:8500"
+    container_name: review-consul
+    command: >
+      agent
+      -server
+      -bootstrap
+      -ui
+      -client=0.0.0.0
+      -bind=0.0.0.0
+    
