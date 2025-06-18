@@ -7,6 +7,7 @@ import (
 	"review/internal/data/model"
 	"review/internal/data/query"
 	"review/pkg/snowflake"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 )
@@ -26,8 +27,45 @@ func NewReviewRepo(data *Data, logger log.Logger) biz.ReviewRepo {
 
 // SaveReview 保存评论
 func (r *reviewRepo) SaveReview(ctx context.Context, review *model.ReviewInfo) (*model.ReviewInfo, error) {
-	err := r.data.q.ReviewInfo.WithContext(ctx).Create(review)
-	return review, err
+	// 1. 数据校验
+	// 同一条订单如果已存在评论，则在原内容基础上追加新评论；否则创建新评论
+	existingReviews, err := r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.OrderID.Eq(review.OrderID)).Find()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(existingReviews) > 0 {
+		// 追加评论内容到原有评论
+		existingReview := existingReviews[0]
+
+		// 追加评论内容，添加时间戳和标识
+		appendedContent := existingReview.Content + "\n\n" +
+			"[追加评论 " + time.Now().Format("2006-01-02 15:04:05") + "]:\n" +
+			review.Content
+
+		// 更新评论内容和其他可能的字段
+		_, err = r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(existingReview.ReviewID)).Updates(map[string]interface{}{
+			"content":    appendedContent,
+			"score":      review.Score,     // 更新评分（如果需要）
+			"service_score": review.ServiceScore,
+			"express_score": review.ExpressScore,
+			"pic_info":   review.PicInfo,   // 更新图片信息（如果需要）
+			"video_info": review.VideoInfo, // 更新视频信息（如果需要）
+		})
+		if err != nil {
+			return nil, errors.New("追加评论失败")
+		}
+
+		// 返回更新后的评论信息
+		return r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(existingReview.ReviewID)).First()
+	} else {
+		// 创建新评论
+		err = r.data.q.ReviewInfo.WithContext(ctx).Create(review)
+		if err != nil {
+			return nil, errors.New("创建评论失败")
+		}
+		return review, nil
+	}
 }
 
 // GetReviewByOrderID 根据订单ID查询评论
@@ -112,18 +150,27 @@ func (r *reviewRepo) AppealReview(ctx context.Context, param *biz.AppealReviewPa
 	if review.StoreID != param.StoreID {
 		return nil, errors.New("商家不能申诉其他商家的评论")
 	}
-	// 1.3 申诉状态校验：一个评论只能申诉一次
+	// 1.3 申诉状态校验：一个评论只能有一条申诉，在待审核状态时可以更新申诉，其他状态不能更新申诉
 	existingAppeals, err := r.data.q.ReviewAppealInfo.WithContext(ctx).Where(r.data.q.ReviewAppealInfo.ReviewID.Eq(param.ReviewID)).Find()
 	if err != nil {
 		return nil, errors.New("查询申诉记录失败")
 	}
 	if len(existingAppeals) > 0 {
-		return nil, errors.New("该评论已存在申诉记录，不能重复申诉")
+		if existingAppeals[0].Status != 10 {
+			return nil, errors.New("该评论存在已审核的申诉记录，不能重复申诉")
+		}
 	}
 
 	// 2. 创建申诉记录
+	// 2.1 如果已存在待审核状态的申诉记录，则使用该申诉ID，供更新这条申诉；否则生成新的申诉ID，供生成新的申诉
+	var appealID int64
+	if len(existingAppeals) > 0 {
+		appealID = existingAppeals[0].AppealID
+	} else {
+		appealID = snowflake.GenID()
+	}
 	appeal := &model.ReviewAppealInfo{
-		AppealID:  snowflake.GenID(),
+		AppealID:  appealID,
 		ReviewID:  param.ReviewID,
 		StoreID:   param.StoreID,
 		Status:    10, // 待审核状态
@@ -131,14 +178,29 @@ func (r *reviewRepo) AppealReview(ctx context.Context, param *biz.AppealReviewPa
 		Content:   param.Content,
 		PicInfo:   param.PicInfo,
 		VideoInfo: param.VideoInfo,
-		CreateBy:  "system",
-		UpdateBy:  "system",
 	}
 
 	// 3. 保存申诉记录
-	err = r.data.q.ReviewAppealInfo.WithContext(ctx).Create(appeal)
-	if err != nil {
-		return nil, errors.New("创建申诉记录失败")
+	// 如果已存在待审核状态的申诉记录，则更新；否则创建新记录
+	if len(existingAppeals) > 0 {
+		// 更新现有待审核状态的申诉记录
+		_, err = r.data.q.ReviewAppealInfo.WithContext(ctx).Where(r.data.q.ReviewAppealInfo.AppealID.Eq(existingAppeals[0].AppealID)).Updates(map[string]interface{}{
+			"reason":     appeal.Reason,
+			"content":    appeal.Content,
+			"pic_info":   appeal.PicInfo,
+			"video_info": appeal.VideoInfo,
+		})
+		if err != nil {
+			return nil, errors.New("更新申诉记录失败")
+		}
+		// 返回更新后的申诉记录
+		appeal.AppealID = existingAppeals[0].AppealID
+	} else {
+		// 创建新的申诉记录
+		err = r.data.q.ReviewAppealInfo.WithContext(ctx).Create(appeal)
+		if err != nil {
+			return nil, errors.New("创建申诉记录失败")
+		}
 	}
 
 	// 4. 返回申诉信息
@@ -177,7 +239,7 @@ func (r *reviewRepo) AuditAppeal(ctx context.Context, param *biz.AuditAppealPara
 		_, err = tx.ReviewAppealInfo.WithContext(ctx).Where(tx.ReviewAppealInfo.AppealID.Eq(param.AppealID)).Updates(map[string]interface{}{
 			"status":     appeal_status,
 			"op_user":    param.OpUser,
-			"reason":  	  param.OpReason,
+			"reason":     param.OpReason,
 			"op_remarks": param.OpRemarks,
 			"update_by":  param.OpUser,
 		})

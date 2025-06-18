@@ -38,13 +38,13 @@ func NewReviewUsecase(repo ReviewRepo, logger log.Logger) *ReviewUsecase {
 func (uc *ReviewUsecase) CreateReview(ctx context.Context, review *model.ReviewInfo) (*model.ReviewInfo, error) {
 	uc.log.WithContext(ctx).Debugf("[biz] CreateReview, review: %v", review)
 	// 1. 数据校验
-	reviews, err := uc.repo.GetReviewByOrderID(ctx, review.OrderID)
+	_, err := uc.repo.GetReviewByOrderID(ctx, review.OrderID)
 	if err != nil {
 		return nil, v1.ErrorDbFailed("数据库查询评论失败, orderID: %d", review.OrderID)
 	}
-	if len(reviews) > 0 {
-		return nil, v1.ErrorOrderReviewed("已评价的订单不能重复评价, orderID: %d", review.OrderID)
-	}
+	// if len(reviews) > 0 {
+	// 	return nil, v1.ErrorOrderReviewed("已评价的订单不能重复评价, orderID: %d", review.OrderID)
+	// }
 
 	// 2. 拼装数据入库
 	return uc.repo.SaveReview(ctx, review)
