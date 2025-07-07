@@ -215,3 +215,31 @@ func (s *ReviewService) ListReviewByStoreID(ctx context.Context, req *pb.ListRev
 	}
 	return &pb.ListReviewByStoreIDReply{List: list}, nil
 }
+
+// 根据用户ID获取评论列表（分页）
+func (s *ReviewService) ListReviewByUserID(ctx context.Context, req *pb.ListReviewByUserIDRequest) (*pb.ListReviewByUserIDReply, error) {
+	fmt.Println("[service] ListReviewByUserID, req:", req)
+	// 调用biz层
+	reviews, err := s.uc.ListReviewByUserID(ctx, req.UserID, req.Page, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	// 拼装返回值
+	list := make([]*pb.ReviewInfo, 0, len(reviews))
+	for _, review := range reviews {
+		list = append(list, &pb.ReviewInfo{
+			ReviewID:     review.ReviewID,
+			UserID:       review.UserID,
+			OrderID:      review.OrderID,
+			StoreID:      review.StoreID,
+			Score:        review.Score,
+			ServiceScore: review.ServiceScore,
+			ExpressScore: review.ExpressScore,
+			Content:      review.Content,
+			PicInfo:      review.PicInfo,
+			VideoInfo:    review.VideoInfo,
+			Status:       review.Status,
+		})
+	}
+	return &pb.ListReviewByUserIDReply{List: list}, nil
+}

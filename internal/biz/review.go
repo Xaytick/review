@@ -23,6 +23,7 @@ type ReviewRepo interface {
 	AuditAppeal(context.Context, *AuditAppealParam) (*model.ReviewAppealInfo, error)
 	ReplyReview(context.Context, *ReplyReviewParam) (*model.ReviewInfo, error)
 	ListReviewByStoreID(context.Context, int64, int32, int32) ([]*MyReviewInfo, error)
+	ListReviewByUserID(context.Context, int64, int32, int32) ([]*MyReviewInfo, error)
 }
 
 type ReviewUsecase struct {
@@ -35,6 +36,48 @@ func NewReviewUsecase(repo ReviewRepo, logger log.Logger) *ReviewUsecase {
 		repo: repo,
 		log:  log.NewHelper(logger),
 	}
+}
+
+// 自定义评论信息, 用于解决 unmarshal error: parsing time "2025-07-03 22:58:19" as "2006-01-02T15:04:05Z07:00"
+// 使用string类型解决 error: json: cannot unmarshal string into Go struct field MyReviewInfo.ReviewInfo.anonymous of type int32
+type MyReviewInfo struct {
+	*model.ReviewInfo
+	CreateAt MyTime `json:"create_at"`
+	UpdateAt MyTime `json:"update_at"`
+	ID             int64      `json:"id,string"`
+	Version        int32      `json:"version,string"`       
+	ReviewID       int64      `json:"review_id,string"`          
+	Score          int32      `json:"score,string"`         
+	ServiceScore   int32      `json:"service_score,string"` 
+	ExpressScore   int32      `json:"express_score,string"` 
+	HasMedia       int32      `json:"has_media,string"`     
+	OrderID        int64      `json:"order_id,string"`      
+	SkuID          int64      `json:"sku_id,string"`        
+	SpuID          int64      `json:"spu_id,string"`        
+	StoreID        int64      `json:"store_id,string"`      
+	UserID         int64      `json:"user_id,string"`       
+	Anonymous      int32      `json:"anonymous,string"`     
+	Status         int32      `json:"status,string"`        
+	IsDefault      int32      `json:"is_default,string"`    
+	HasReply       int32      `json:"has_reply,string"`     
+}
+
+// 自定义时间类型，便于实现UnmarshalJSON方法
+type MyTime time.Time
+
+// UnmarshalJSON 自定义时间反序列化，解决es和go时间格式不一样的问题
+func (t *MyTime) UnmarshalJSON(data []byte) error {
+	// 2025-07-03 22:58:19
+	// 2025-07-03T22:58:19+08:00
+
+	s := strings.Trim(string(data), `"`)
+	tmp, err := time.ParseInLocation(time.DateTime, s, time.Local)
+	if err != nil {
+		return err
+	}
+	*t = MyTime(tmp)
+	return nil
+	
 }
 
 // 创建评论, service层调用
@@ -137,45 +180,17 @@ func (uc *ReviewUsecase) ListReviewByStoreID(ctx context.Context, storeID int64,
 	return uc.repo.ListReviewByStoreID(ctx, storeID, offset, limit)
 }
 
-// 自定义评论信息, 用于解决 unmarshal error: parsing time "2025-07-03 22:58:19" as "2006-01-02T15:04:05Z07:00"
-// 使用string类型解决 error: json: cannot unmarshal string into Go struct field MyReviewInfo.ReviewInfo.anonymous of type int32
-type MyReviewInfo struct {
-	*model.ReviewInfo
-	CreateAt MyTime `json:"create_at"`
-	UpdateAt MyTime `json:"update_at"`
-	ID             int64      `json:"id,string"`
-	Version        int32      `json:"version,string"`       
-	ReviewID       int64      `json:"review_id,string"`          
-	Score          int32      `json:"score,string"`         
-	ServiceScore   int32      `json:"service_score,string"` 
-	ExpressScore   int32      `json:"express_score,string"` 
-	HasMedia       int32      `json:"has_media,string"`     
-	OrderID        int64      `json:"order_id,string"`      
-	SkuID          int64      `json:"sku_id,string"`        
-	SpuID          int64      `json:"spu_id,string"`        
-	StoreID        int64      `json:"store_id,string"`      
-	UserID         int64      `json:"user_id,string"`       
-	Anonymous      int32      `json:"anonymous,string"`     
-	Status         int32      `json:"status,string"`        
-	IsDefault      int32      `json:"is_default,string"`    
-	HasReply       int32      `json:"has_reply,string"`     
-}
 
-// 自定义时间类型，便于实现UnmarshalJSON方法
-type MyTime time.Time
-
-// UnmarshalJSON 自定义时间反序列化，解决es和go时间格式不一样的问题
-func (t *MyTime) UnmarshalJSON(data []byte) error {
-	// 2025-07-03 22:58:19
-	// 2025-07-03T22:58:19+08:00
-
-	s := strings.Trim(string(data), `"`)
-	tmp, err := time.ParseInLocation(time.DateTime, s, time.Local)
-	if err != nil {
-		return err
+// ListReviewByUserID 根据用户ID获取评论列表（分页）
+func (uc *ReviewUsecase) ListReviewByUserID(ctx context.Context, userID int64, page int32, size int32) ([]*MyReviewInfo, error) {
+	if page <= 0 {
+		page = 1
 	}
-	*t = MyTime(tmp)
-	return nil
-	
+	if size <= 0 || size > 50 {
+		size = 10
+	}
+	offset := (page - 1) * size
+	limit := size
+	uc.log.WithContext(ctx).Debugf("[biz] ListReviewByUserID, userID: %d, offset: %d, limit: %d", userID, offset, limit)
+	return uc.repo.ListReviewByUserID(ctx, userID, offset, limit)
 }
-

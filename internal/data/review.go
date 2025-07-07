@@ -333,3 +333,41 @@ func (r *reviewRepo) ListReviewByStoreID(ctx context.Context, storeID int64, off
 	return list, nil
 }
 
+// ListReviewByUserID 根据用户ID获取评论列表（分页）
+func (r *reviewRepo) ListReviewByUserID(ctx context.Context, userID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+	// 去ES查询
+	resp, err := r.data.es.Search().Index("review").
+		Query(&types.Query{
+			Bool: &types.BoolQuery{
+				Filter: []types.Query{
+					{
+						Term: map[string]types.TermQuery{
+							"user_id": {Value: userID},
+						},
+					},
+				},
+			},
+		}).
+		From(int(offset)).
+		Size(int(limit)).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	b, _ := json.Marshal(resp)
+	fmt.Println("es search result total:", resp.Hits.Total.Value)
+	fmt.Println("es search result hits:", string(b))
+
+	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
+	// 反序列化
+	for _, hit := range resp.Hits.Hits {
+		tmp := &biz.MyReviewInfo{}
+		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+			r.log.Errorf("es search result unmarshal error: %v", err)
+			continue
+		}
+		list = append(list, tmp)
+	}
+	return list, nil
+}

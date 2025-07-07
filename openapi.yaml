@@ -177,6 +177,64 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.review.v1.ReplyReviewReply'
+    /v1/review/store/{storeID}:
+        get:
+            tags:
+                - Review
+            description: 根据商家ID获取评论列表（分页）
+            operationId: Review_ListReviewByStoreID
+            parameters:
+                - name: storeID
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.review.v1.ListReviewByStoreIDReply'
+    /v1/review/user/{userID}:
+        get:
+            tags:
+                - Review
+            description: 根据用户ID获取评论列表（分页）
+            operationId: Review_ListReviewByUserID
+            parameters:
+                - name: userID
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.review.v1.ListReviewByUserIDReply'
     /v1/review/{reviewID}:
         get:
             tags:
@@ -400,6 +458,22 @@ components:
                 reviewInfo:
                     $ref: '#/components/schemas/api.review.v1.ReviewInfo'
             description: 获取评论回复
+        api.review.v1.ListReviewByStoreIDReply:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.review.v1.ReviewInfo'
+            description: 根据商家ID获取评论列表（分页）回复
+        api.review.v1.ListReviewByUserIDReply:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.review.v1.ReviewInfo'
+            description: 根据用户ID获取评论列表（分页）回复
         api.review.v1.ReplyReviewReply:
             type: object
             properties:
