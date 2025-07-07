@@ -27,4 +27,63 @@ services:
       -ui
       -client=0.0.0.0
       -bind=0.0.0.0
+
+  review-canal:
+    image: canal/canal-server:latest
+    ports:
+      - "11111:11111"
+    container_name: review-canal
+    environment:
+      - canal.auto.scan=false
+      - canal.instance.master.address=review-mysql:3306
+      - canal.instance.tsdb.enable=true
+      - canal.instance.tsdb.dbUsername=canal
+      - canal.instance.tsdb.dbPassword=canal
+    depends_on:
+      - review-mysql
     
+
+  review-zoo1:
+    image: confluentinc/cp-zookeeper:7.3.2
+    hostname: review-zoo1
+    container_name: review-zoo1
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_SERVERS: review-zoo1:2888:3888
+
+  review-kafka1:
+    image: confluentinc/cp-kafka:7.3.2
+    hostname: review-kafka1
+    container_name: review-kafka1
+    ports:
+      - "19092:9092"
+      - "29092:29092"
+      - "19999:9999"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://review-kafka1:19092,EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:9092,DOCKER://host.docker.internal:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,DOCKER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_ZOOKEEPER_CONNECT: "review-zoo1:2181"
+      KAFKA_BROKER_ID: 1
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_JMX_PORT: 9999
+      KAFKA_JMX_HOSTNAME: ${DOCKER_HOST_IP:-127.0.0.1}
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+    depends_on:
+      - review-zoo1
+  review-kafka-ui:
+    container_name: review-kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - 8070:8080
+    depends_on:
+      - review-kafka1
+    environment:
+      DYNAMIC_CONFIG_ENABLED: "TRUE"

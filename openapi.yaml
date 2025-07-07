@@ -3,10 +3,85 @@
 
 openapi: 3.0.3
 info:
-    title: Review API
-    description: 定义评论服务
+    title: ""
     version: 0.0.1
 paths:
+    /b/v1/review/appeal:
+        post:
+            tags:
+                - Business
+            description: 商家申诉用户评论
+            operationId: Business_AppealReview
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.business.v1.AppealReviewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.business.v1.AppealReviewReply'
+    /b/v1/review/reply:
+        post:
+            tags:
+                - Business
+            description: 商家回复用户评论
+            operationId: Business_ReplyReview
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.business.v1.ReplyReviewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.business.v1.ReplyReviewReply'
+    /o/v1/appeal/audit:
+        post:
+            tags:
+                - Operation
+            description: 运营审核申诉
+            operationId: Operation_AuditAppeal
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.operation.v1.AuditAppealRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.operation.v1.AuditAppealReply'
+    /o/v1/review/audit:
+        post:
+            tags:
+                - Operation
+            description: 运营审核评论
+            operationId: Operation_AuditReview
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.operation.v1.AuditReviewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.operation.v1.AuditReviewReply'
     /v1/appeal/audit:
         post:
             tags:
@@ -123,6 +198,96 @@ paths:
                                 $ref: '#/components/schemas/api.review.v1.GetReviewReply'
 components:
     schemas:
+        api.business.v1.AppealReviewReply:
+            type: object
+            properties:
+                appealID:
+                    type: string
+            description: 申诉评论回复
+        api.business.v1.AppealReviewRequest:
+            type: object
+            properties:
+                reviewID:
+                    type: string
+                storeID:
+                    type: string
+                reason:
+                    type: string
+                content:
+                    type: string
+                picInfo:
+                    type: string
+                videoInfo:
+                    type: string
+            description: 申诉评论请求
+        api.business.v1.ReplyReviewReply:
+            type: object
+            properties:
+                replyID:
+                    type: string
+            description: 回复评论回复
+        api.business.v1.ReplyReviewRequest:
+            type: object
+            properties:
+                reviewID:
+                    type: string
+                storeID:
+                    type: string
+                content:
+                    type: string
+                picInfo:
+                    type: string
+                videoInfo:
+                    type: string
+            description: 回复评论请求
+        api.operation.v1.AuditAppealReply:
+            type: object
+            properties:
+                appealID:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+            description: 审核申诉回复
+        api.operation.v1.AuditAppealRequest:
+            type: object
+            properties:
+                appealID:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                opUser:
+                    type: string
+                opReason:
+                    type: string
+                opRemarks:
+                    type: string
+            description: 审核申诉请求
+        api.operation.v1.AuditReviewReply:
+            type: object
+            properties:
+                reviewID:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+            description: 审核评论回复
+        api.operation.v1.AuditReviewRequest:
+            type: object
+            properties:
+                reviewID:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                opUser:
+                    type: string
+                opReason:
+                    type: string
+                opRemarks:
+                    type: string
+            description: 审核评论请求
         api.review.v1.AppealReviewReply:
             type: object
             properties:
@@ -285,4 +450,9 @@ components:
                     format: int32
             description: 评论信息
 tags:
+    - name: Business
+      description: 商家端服务
+    - name: Operation
+      description: 运营端服务
     - name: Review
+      description: 定义评论服务
