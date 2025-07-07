@@ -9,10 +9,14 @@ import (
 	"review/internal/data/model"
 	"review/internal/data/query"
 	"review/pkg/snowflake"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 type reviewRepo struct {
@@ -48,12 +52,12 @@ func (r *reviewRepo) SaveReview(ctx context.Context, review *model.ReviewInfo) (
 
 		// 更新评论内容和其他可能的字段
 		_, err = r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(existingReview.ReviewID)).Updates(map[string]interface{}{
-			"content":    appendedContent,
-			"score":      review.Score,     // 更新评分（如果需要）
+			"content":       appendedContent,
+			"score":         review.Score, // 更新评分（如果需要）
 			"service_score": review.ServiceScore,
 			"express_score": review.ExpressScore,
-			"pic_info":   review.PicInfo,   // 更新图片信息（如果需要）
-			"video_info": review.VideoInfo, // 更新视频信息（如果需要）
+			"pic_info":      review.PicInfo,   // 更新图片信息（如果需要）
+			"video_info":    review.VideoInfo, // 更新视频信息（如果需要）
 		})
 		if err != nil {
 			return nil, errors.New("追加评论失败")
@@ -296,72 +300,32 @@ func (r *reviewRepo) ReplyReview(ctx context.Context, param *biz.ReplyReviewPara
 
 // ListReviewByStoreID 根据商家ID获取评论列表（分页）
 func (r *reviewRepo) ListReviewByStoreID(ctx context.Context, storeID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
-	// 去ES查询
-	resp, err := r.data.es.Search().Index("review").
-		Query(&types.Query{
-			Bool: &types.BoolQuery{
-				Filter: []types.Query{
-					{
-						Term: map[string]types.TermQuery{
-							"store_id": {Value: storeID},
-						},
-					},
-				},
-			},
-		}).
-		From(int(offset)).
-		Size(int(limit)).
-		Do(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	b, _ := json.Marshal(resp)
-	fmt.Println("es search result total:", resp.Hits.Total.Value)
-	fmt.Println("es search result hits:", string(b))
-
-	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
-	// 反序列化
-	for _, hit := range resp.Hits.Hits {
-		tmp := &biz.MyReviewInfo{}
-		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
-			r.log.Errorf("es search result unmarshal error: %v", err)
-			continue
-		}
-		list = append(list, tmp)
-	}
-	return list, nil
+	return r.ListReviewByStoreID1(ctx, storeID, offset, limit)
 }
 
-// ListReviewByUserID 根据用户ID获取评论列表（分页）
 func (r *reviewRepo) ListReviewByUserID(ctx context.Context, userID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
-	// 去ES查询
-	resp, err := r.data.es.Search().Index("review").
-		Query(&types.Query{
-			Bool: &types.BoolQuery{
-				Filter: []types.Query{
-					{
-						Term: map[string]types.TermQuery{
-							"user_id": {Value: userID},
-						},
-					},
-				},
-			},
-		}).
-		From(int(offset)).
-		Size(int(limit)).
-		Do(ctx)
+	return r.ListReviewByUserID1(ctx, userID, offset, limit)
+}
+
+var g = singleflight.Group{}
+
+// 升级版带缓存的查询函数, 根据商家ID获取评论列表（分页）
+func (r *reviewRepo) ListReviewByStoreID1(ctx context.Context, storeID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+	// 1. 从redis中获取数据
+	// 2. 如果redis中没有数据，则从ES中获取数据
+	// 3. 通过singleflight.Group合并并发请求
+	key := fmt.Sprintf("review:%d:%d:%d", storeID, offset, limit)
+	b, err := r.GetDataBySingleFlight(ctx, key, "store")
 	if err != nil {
 		return nil, err
 	}
-
-	b, _ := json.Marshal(resp)
-	fmt.Println("es search result total:", resp.Hits.Total.Value)
-	fmt.Println("es search result hits:", string(b))
-
-	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
-	// 反序列化
-	for _, hit := range resp.Hits.Hits {
+	hm := new(types.HitsMetadata)
+	if err := json.Unmarshal(b, hm); err != nil {
+		return nil, err
+	}
+	// 4. 反序列化
+	list := make([]*biz.MyReviewInfo, 0, hm.Total.Value)
+	for _, hit := range hm.Hits {
 		tmp := &biz.MyReviewInfo{}
 		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
 			r.log.Errorf("es search result unmarshal error: %v", err)
@@ -371,3 +335,202 @@ func (r *reviewRepo) ListReviewByUserID(ctx context.Context, userID int64, offse
 	}
 	return list, nil
 }
+
+// 升级版带缓存的查询函数, 根据用户ID获取评论列表（分页）
+func (r *reviewRepo) ListReviewByUserID1(ctx context.Context, userID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+	// 1. 从redis中获取数据
+	// 2. 如果redis中没有数据，则从ES中获取数据
+	// 3. 通过singleflight.Group合并并发请求
+	key := fmt.Sprintf("review:%d:%d:%d", userID, offset, limit)
+	b, err := r.GetDataBySingleFlight(ctx, key, "user")
+	if err != nil {
+		return nil, err
+	}
+	hm := new(types.HitsMetadata)
+	if err := json.Unmarshal(b, hm); err != nil {
+		return nil, err
+	}
+	// 4. 反序列化
+	list := make([]*biz.MyReviewInfo, 0, hm.Total.Value)
+	for _, hit := range hm.Hits {
+		tmp := &biz.MyReviewInfo{}
+		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+			r.log.Errorf("es search result unmarshal error: %v", err)
+			continue
+		}
+		list = append(list, tmp)
+	}
+	return list, nil
+}
+
+// 通过singleflight获取数据
+func (r *reviewRepo) GetDataBySingleFlight(ctx context.Context, key string, target string) ([]byte, error) {
+	v, err, _ := g.Do(key, func() (interface{}, error) {
+		// 1. 从redis中获取数据
+		data, err := r.GetDataFromCache(ctx, key)
+		if err == nil {
+			r.log.Debugf("GetDataBySingleFlight(from redis cache), key: %s, data: %s", key, string(data))
+			return data, nil
+		}
+		// 2. 如果redis中没有数据，则从ES中获取数据
+		if errors.Is(err, redis.Nil) {
+			data, err = r.GetDataFromES(ctx, key, target)
+			if err == nil {
+				r.log.Debugf("GetDataBySingleFlight(from es), key: %s, data: %s", key, string(data))
+				return data, r.SetCache(ctx, key, data)
+			}
+			return nil, err
+		}
+		// 3. 如果查询redis报错，则返回错误
+		return nil, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
+}
+
+// 读缓存
+func (r *reviewRepo) GetDataFromCache(ctx context.Context, key string) ([]byte, error) {
+	r.log.Debugf("GetDataFromCache, key: %s", key)
+	return r.data.rdb.Get(ctx, key).Bytes()
+}
+
+// 从ES中获取数据，target: store or user
+func (r *reviewRepo) GetDataFromES(ctx context.Context, key string, target string) ([]byte, error) {
+	values := strings.Split(key, ":")
+	if len(values) < 4 {
+		return nil, errors.New("key format error")
+	}
+	index := values[0]
+	id := values[1] // storeID or userID
+	offsetStr := values[2]
+	limitStr := values[3]
+
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil {
+		return nil, err
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// 去ES查询
+	var fieldName string
+	if target == "store" {
+		fieldName = "store_id"
+	} else if target == "user" {
+		fieldName = "user_id"
+	} else {
+		return nil, errors.New("invalid target")
+	}
+
+	resp, err := r.data.es.Search().
+		Index(index).
+		Query(&types.Query{
+			Bool: &types.BoolQuery{
+				Filter: []types.Query{
+					{
+						Term: map[string]types.TermQuery{
+							fieldName: {Value: id},
+						},
+					},
+				},
+			},
+		}).
+		From(offset).
+		Size(limit).
+		Do(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	b, _ := json.Marshal(resp.Hits)
+
+	return b, nil
+}
+
+// 设置缓存
+func (r *reviewRepo) SetCache(ctx context.Context, key string, value []byte) error {
+	return r.data.rdb.Set(ctx, key, value, time.Second*60).Err()
+}
+
+// // 旧版不带缓存的查询函数
+// func (r *reviewRepo) ListReviewByStoreID2(ctx context.Context, storeID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+// 	// 去ES查询
+// 	resp, err := r.data.es.Search().Index("review").
+// 		Query(&types.Query{
+// 			Bool: &types.BoolQuery{
+// 				Filter: []types.Query{
+// 					{
+// 						Term: map[string]types.TermQuery{
+// 							"store_id": {Value: storeID},
+// 						},
+// 					},
+// 				},
+// 			},
+// 		}).
+// 		From(int(offset)).
+// 		Size(int(limit)).
+// 		Do(ctx)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	b, _ := json.Marshal(resp)
+// 	fmt.Println("es search result total:", resp.Hits.Total.Value)
+// 	fmt.Println("es search result hits:", string(b))
+
+// 	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
+// 	// 反序列化
+// 	for _, hit := range resp.Hits.Hits {
+// 		tmp := &biz.MyReviewInfo{}
+// 		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+// 			r.log.Errorf("es search result unmarshal error: %v", err)
+// 			continue
+// 		}
+// 		list = append(list, tmp)
+// 	}
+// 	return list, nil
+// }
+
+// // 旧版不带缓存的查询函数
+// func (r *reviewRepo) ListReviewByUserID2(ctx context.Context, userID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+// 	// 去ES查询
+// 	resp, err := r.data.es.Search().Index("review").
+// 		Query(&types.Query{
+// 			Bool: &types.BoolQuery{
+// 				Filter: []types.Query{
+// 					{
+// 						Term: map[string]types.TermQuery{
+// 							"user_id": {Value: userID},
+// 						},
+// 					},
+// 				},
+// 			},
+// 		}).
+// 		From(int(offset)).
+// 		Size(int(limit)).
+// 		Do(ctx)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	b, _ := json.Marshal(resp)
+// 	fmt.Println("es search result total:", resp.Hits.Total.Value)
+// 	fmt.Println("es search result hits:", string(b))
+
+// 	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
+// 	// 反序列化
+// 	for _, hit := range resp.Hits.Hits {
+// 		tmp := &biz.MyReviewInfo{}
+// 		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+// 			r.log.Errorf("es search result unmarshal error: %v", err)
+// 			continue
+// 		}
+// 		list = append(list, tmp)
+// 	}
+// 	return list, nil
+// }
