@@ -10,6 +10,7 @@ message Bootstrap {
   Data data = 2;
   Snowflake snowflake = 3;
   Elasticsearch elasticsearch = 4;
+  AI ai = 5;
 }
 
 message Server {
@@ -57,4 +58,9 @@ message Registry {
 
 message Elasticsearch {
   repeated string addresses = 1;
+}
+
+message AI {
+  string api_key = 1;
+  string model = 2;
 }

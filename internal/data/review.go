@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"review/internal/biz"
+	"review/internal/client/ai"
 	"review/internal/data/model"
 	"review/internal/data/query"
 	"review/pkg/snowflake"
@@ -22,13 +23,15 @@ import (
 type reviewRepo struct {
 	data *Data
 	log  *log.Helper
+	ai   *ai.AIClient
 }
 
 // NewReviewRepo 新建评论仓库
-func NewReviewRepo(data *Data, logger log.Logger) biz.ReviewRepo {
+func NewReviewRepo(data *Data, logger log.Logger, ai *ai.AIClient) biz.ReviewRepo {
 	return &reviewRepo{
 		data: data,
 		log:  log.NewHelper(logger),
+		ai:   ai,
 	}
 }
 
@@ -129,17 +132,43 @@ func (r *reviewRepo) AuditReview(ctx context.Context, param *biz.AuditReviewPara
 		return nil, errors.New("只有待审核状态的评论才能进行审核")
 	}
 
-	// 2. 更新评论审核信息
+	// 2. 调用AI审核
+	approved, reason, err := r.ai.ModerateText(ctx, review.Content)
+	if err != nil {
+		r.log.Errorf("AI审核失败: %v", err)
+		return review, err
+	}
+	var status int32
+	var remarks string
+	if !approved {
+		status = 30
+		remarks = "AI审核不通过"
+	} else {
+		status = 20
+		remarks = "AI审核通过"
+	}
 	_, err = r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(param.ReviewID)).Updates(map[string]interface{}{
-		"status":     param.Status,
-		"op_user":    param.OpUser,
-		"op_reason":  param.OpReason,
-		"op_remarks": param.OpRemarks,
-		"update_by":  param.OpUser,
+		"status":     status,
+		"op_reason":  reason,
+		"op_remarks": remarks,
+		"update_by":  "Gemini",
+		"update_at":  time.Now(),
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	// // 2. 更新评论审核信息
+	// _, err = r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(param.ReviewID)).Updates(map[string]interface{}{
+	// 	"status":     param.Status,
+	// 	"op_user":    param.OpUser,
+	// 	"op_reason":  param.OpReason,
+	// 	"op_remarks": param.OpRemarks,
+	// 	"update_by":  param.OpUser,
+	// })
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	// 3. 查询并返回更新后的评论信息
 	return r.GetReviewByReviewID(ctx, param.ReviewID)

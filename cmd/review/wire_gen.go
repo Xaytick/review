@@ -23,7 +23,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, registry *conf.Registry, elasticsearch *conf.Elasticsearch) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, registry *conf.Registry, elasticsearch *conf.Elasticsearch, ai *conf.AI) (*kratos.App, func(), error) {
 	db, err := data.NewDB(confData)
 	if err != nil {
 		return nil, nil, err
@@ -33,11 +33,15 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, re
 		return nil, nil, err
 	}
 	client := data.NewRedisClient(confData)
-	dataData, cleanup, err := data.NewData(db, typedClient, client, logger)
+	aiClient, err := data.NewAIClient(ai)
 	if err != nil {
 		return nil, nil, err
 	}
-	reviewRepo := data.NewReviewRepo(dataData, logger)
+	dataData, cleanup, err := data.NewData(db, typedClient, client, logger, aiClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	reviewRepo := data.NewReviewRepo(dataData, logger, aiClient)
 	reviewUsecase := biz.NewReviewUsecase(reviewRepo, logger)
 	reviewService := service.NewReviewService(reviewUsecase)
 	grpcServer := server.NewGRPCServer(confServer, reviewService, logger)

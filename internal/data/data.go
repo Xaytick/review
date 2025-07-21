@@ -1,6 +1,7 @@
 package data
 
 import (
+	"review/internal/client/ai"
 	"review/internal/conf"
 	"review/internal/data/query"
 	"strings"
@@ -14,7 +15,7 @@ import (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, NewReviewRepo, NewDB, NewESClient, NewRedisClient)
+var ProviderSet = wire.NewSet(NewData, NewReviewRepo, NewDB, NewESClient, NewRedisClient, NewAIClient)
 
 // Data .
 type Data struct {
@@ -23,10 +24,11 @@ type Data struct {
 	log *log.Helper
 	es  *elasticsearch.TypedClient
 	rdb *redis.Client
+	ai  *ai.AIClient
 }
 
 // NewData .
-func NewData(db *gorm.DB, esClient *elasticsearch.TypedClient, rdb *redis.Client, logger log.Logger) (*Data, func(), error) {
+func NewData(db *gorm.DB, esClient *elasticsearch.TypedClient, rdb *redis.Client, logger log.Logger, ai *ai.AIClient) (*Data, func(), error) {
 	cleanup := func() {
 		log.NewHelper(logger).Info("closing the data resources")
 	}
@@ -36,6 +38,7 @@ func NewData(db *gorm.DB, esClient *elasticsearch.TypedClient, rdb *redis.Client
 		log: log.NewHelper(logger),
 		es:  esClient,
 		rdb: rdb,
+		ai:  ai,
 	}, cleanup, nil
 }
 
@@ -62,4 +65,8 @@ func NewRedisClient(c *conf.Data) *redis.Client {
 		ReadTimeout:  c.Redis.ReadTimeout.AsDuration(),
 		WriteTimeout: c.Redis.WriteTimeout.AsDuration(),
 	})
+}
+
+func NewAIClient(c *conf.AI) (*ai.AIClient, error) {
+	return ai.NewAIClient(c)
 }

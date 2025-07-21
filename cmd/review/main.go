@@ -7,6 +7,8 @@ import (
 	"review/internal/conf"
 	"review/pkg/snowflake"
 
+	"github.com/joho/godotenv"
+
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"
 	"github.com/go-kratos/kratos/v2/config/file"
@@ -52,6 +54,13 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, r registry.Regi
 
 func main() {
 	flag.Parse()
+
+	// 从.env文件加载环境变量
+	// 这应该在加载任何依赖于环境变量的配置之前完成
+	if err := godotenv.Load("../../.env"); err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
 	logger := log.With(log.NewStdLogger(os.Stdout),
 		"ts", log.DefaultTimestamp,
 		"caller", log.DefaultCaller,
@@ -61,6 +70,7 @@ func main() {
 		"trace.id", tracing.TraceID(),
 		"span.id", tracing.SpanID(),
 	)
+
 	c := config.New(
 		config.WithSource(
 			file.NewSource(flagconf),
@@ -77,12 +87,21 @@ func main() {
 		panic(err)
 	}
 
+	// Manually set the API key from the environment variable.
+	// This bypasses any issues with config placeholder expansion.
+	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
+		if bc.Ai == nil {
+			bc.Ai = &conf.AI{}
+		}
+		bc.Ai.ApiKey = apiKey
+	}
+
 	var rc conf.Registry
 	if err := c.Scan(&rc); err != nil {
 		panic(err)
 	}
 
-	app, cleanup, err := wireApp(bc.Server, bc.Data, logger, &rc, bc.Elasticsearch)
+	app, cleanup, err := wireApp(bc.Server, bc.Data, logger, &rc, bc.Elasticsearch, bc.Ai)
 	if err != nil {
 		panic(err)
 	}
