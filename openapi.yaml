@@ -6,6 +6,25 @@ info:
     title: ""
     version: 0.0.1
 paths:
+    /ai/v1/chat:
+        post:
+            tags:
+                - AIAgent
+            description: 与 AI 聊天
+            operationId: AIAgent_Chat
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.ai.v1.ChatRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.ai.v1.ChatReply'
     /b/v1/review/appeal:
         post:
             tags:
@@ -256,6 +275,22 @@ paths:
                                 $ref: '#/components/schemas/api.review.v1.GetReviewReply'
 components:
     schemas:
+        api.ai.v1.ChatReply:
+            type: object
+            properties:
+                response:
+                    type: string
+            description: 聊天回复
+        api.ai.v1.ChatRequest:
+            type: object
+            properties:
+                prompt:
+                    type: string
+                context:
+                    type: array
+                    items:
+                        type: string
+            description: 聊天请求
         api.business.v1.AppealReviewReply:
             type: object
             properties:
@@ -524,6 +559,8 @@ components:
                     format: int32
             description: 评论信息
 tags:
+    - name: AIAgent
+      description: AI Agent 服务
     - name: Business
       description: 商家端服务
     - name: Operation

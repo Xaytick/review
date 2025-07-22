@@ -25,6 +25,11 @@ func NewAIClient(c *conf.AI) (*AIClient, error) {
 	return &AIClient{llm: llm}, nil
 }
 
+// GetLLM 获取LLM实例
+func (c *AIClient) GetLLM() *googleai.GoogleAI {
+	return c.llm
+}
+
 // ModerateText 使用LLM审核文本内容
 // 返回值: is_approved, reason
 func (c *AIClient) ModerateText(ctx context.Context, text string) (bool, string, error) {

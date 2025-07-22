@@ -45,7 +45,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, re
 	reviewUsecase := biz.NewReviewUsecase(reviewRepo, logger)
 	reviewService := service.NewReviewService(reviewUsecase)
 	grpcServer := server.NewGRPCServer(confServer, reviewService, logger)
-	httpServer := server.NewHTTPServer(confServer, reviewService, logger)
+	aiAgentService := service.NewAIAgentService(aiClient, logger)
+	httpServer := server.NewHTTPServer(confServer, reviewService, aiAgentService, logger)
 	registrar := server.NewRegistrar(registry)
 	app := newApp(logger, grpcServer, httpServer, registrar)
 	return app, func() {

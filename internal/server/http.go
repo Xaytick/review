@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+	ai_pb "review/api/ai/v1"
 	v1 "review/api/review/v1"
 	"review/internal/conf"
 	"review/internal/service"
@@ -8,27 +10,32 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
 	"github.com/go-kratos/kratos/v2/middleware/validate"
-	"github.com/go-kratos/kratos/v2/transport/http"
+	kratoshttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, review *service.ReviewService, logger log.Logger) *http.Server {
-	var opts = []http.ServerOption{
-		http.Middleware(
+func NewHTTPServer(c *conf.Server, review *service.ReviewService, aiAgent *service.AIAgentService, logger log.Logger) *kratoshttp.Server {
+	var opts = []kratoshttp.ServerOption{
+		kratoshttp.Middleware(
 			recovery.Recovery(),
 			validate.Validator(),
 		),
 	}
 	if c.Http.Network != "" {
-		opts = append(opts, http.Network(c.Http.Network))
+		opts = append(opts, kratoshttp.Network(c.Http.Network))
 	}
 	if c.Http.Addr != "" {
-		opts = append(opts, http.Address(c.Http.Addr))
+		opts = append(opts, kratoshttp.Address(c.Http.Addr))
 	}
 	if c.Http.Timeout != nil {
-		opts = append(opts, http.Timeout(c.Http.Timeout.AsDuration()))
+		opts = append(opts, kratoshttp.Timeout(c.Http.Timeout.AsDuration()))
 	}
-	srv := http.NewServer(opts...)
+	srv := kratoshttp.NewServer(opts...)
 	v1.RegisterReviewHTTPServer(srv, review)
+	ai_pb.RegisterAIAgentHTTPServer(srv, aiAgent)
+
+	staticHandler := http.FileServer(http.Dir("../../frontend"))
+	srv.HandlePrefix("/", http.StripPrefix("/", staticHandler))
+
 	return srv
 }
