@@ -49,26 +49,25 @@ func newReviewReplyInfo(db *gorm.DB, opts ...gen.DOOption) reviewReplyInfo {
 	return _reviewReplyInfo
 }
 
-// reviewReplyInfo 评价商家回复表
 type reviewReplyInfo struct {
 	reviewReplyInfoDo reviewReplyInfoDo
 
 	ALL       field.Asterisk
-	ID        field.Int64  // 主键
-	CreateBy  field.String // 创建⽅标识
-	UpdateBy  field.String // 更新⽅标识
-	CreateAt  field.Time   // 创建时间
-	UpdateAt  field.Time   // 更新时间
-	DeleteAt  field.Time   // 逻辑删除标记
-	Version   field.Int32  // 乐观锁标记
-	ReplyID   field.Int64  // 回复id
-	ReviewID  field.Int64  // 评价id
-	StoreID   field.Int64  // 店铺id
-	Content   field.String // 评价内容
-	PicInfo   field.String // 媒体信息：图⽚
-	VideoInfo field.String // 媒体信息：视频
-	ExtJSON   field.String // 信息扩展
-	CtrlJSON  field.String // 控制扩展
+	ID        field.Int64
+	CreateBy  field.String
+	UpdateBy  field.String
+	CreateAt  field.Time
+	UpdateAt  field.Time
+	DeleteAt  field.Time
+	Version   field.Int32
+	ReplyID   field.Int64 // id
+	ReviewID  field.Int64 // id
+	StoreID   field.Int64 // id
+	Content   field.String
+	PicInfo   field.String
+	VideoInfo field.String
+	ExtJSON   field.String
+	CtrlJSON  field.String
 
 	fieldMap map[string]field.Expr
 }

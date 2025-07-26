@@ -66,15 +66,78 @@ func (r *reviewRepo) SaveReview(ctx context.Context, review *model.ReviewInfo) (
 			return nil, errors.New("追加评论失败")
 		}
 
-		// 返回更新后的评论信息
-		return r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(existingReview.ReviewID)).First()
+		// 重新从数据库获取更新后的评论信息，以确保数据（特别是时间戳）是最新的
+		updatedReview, err := r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(existingReview.ReviewID)).First()
+		if err != nil {
+			// 即使这里失败，主流程也算成功，但需要记录错误
+			r.log.WithContext(ctx).Errorf("failed to fetch updated review after appending, reviewID: %d, err: %v", existingReview.ReviewID, err)
+			return existingReview, nil // 返回追加前的数据
+		}
+		// 异步处理
+		go r.syncAndAudit(updatedReview)
+		return updatedReview, nil
 	} else {
 		// 创建新评论
 		err = r.data.q.ReviewInfo.WithContext(ctx).Create(review)
 		if err != nil {
 			return nil, errors.New("创建评论失败")
 		}
+
+		// 异步处理
+		go r.syncAndAudit(review) // 此时的review对象包含了数据库生成的ID和时间戳
 		return review, nil
+	}
+}
+
+// syncAndAudit 封装了需要异步执行的同步和审核任务
+func (r *reviewRepo) syncAndAudit(review *model.ReviewInfo) {
+	// 为后台任务创建一个新的上下文
+	ctx := context.Background()
+
+	// 1. 先进行AI审核，审核过程会更新DB中的状态
+	auditedReview, auditErr := r.AuditReview(ctx, &biz.AuditReviewParam{ReviewID: review.ReviewID})
+	if auditErr != nil {
+		r.log.WithContext(ctx).Errorf("Async AI audit failed for review ID %d: %v", review.ReviewID, auditErr)
+		// 如果审核失败，我们仍然将最初的“待审核”状态的评论同步到ES，以确保其可被搜索到
+		auditedReview = review
+	} else {
+		r.log.WithContext(ctx).Infof("Async AI audit successful for review ID: %d", review.ReviewID)
+	}
+
+	// 2. 将最终状态的评论同步到ES
+	if err := r.SaveToES(ctx, auditedReview); err != nil {
+		r.log.WithContext(ctx).Errorf("Async SaveToES failed for review ID %d: %v", auditedReview.ReviewID, err)
+	} else {
+		r.log.WithContext(ctx).Infof("Async SaveToES successful for review ID: %d", auditedReview.ReviewID)
+	}
+}
+
+// SaveToES 保存到ES
+func (r *reviewRepo) SaveToES(ctx context.Context, review *model.ReviewInfo) error {
+	_, err := r.data.es.Index("review").
+		Id(strconv.FormatInt(review.ReviewID, 10)).
+		Request(review).
+		Do(ctx)
+	if err != nil {
+		r.log.WithContext(ctx).Errorf("failed to save review to ES: %v", err)
+	}
+	return err
+}
+
+// 自动ai审核, 异步执行
+func (r *reviewRepo) AutoAuditReview(reviewToAudit *model.ReviewInfo) {
+	// 为后台任务创建一个新的上下文，因为原始上下文将在HTTP请求完成后被取消。
+	auditCtx := context.Background()
+	r.log.WithContext(auditCtx).Infof("Starting async AI audit for review ID: %d", reviewToAudit.ReviewID)
+
+	_, auditErr := r.AuditReview(auditCtx, &biz.AuditReviewParam{
+		ReviewID: reviewToAudit.ReviewID,
+	})
+
+	if auditErr != nil {
+		r.log.WithContext(auditCtx).Errorf("Async AI audit failed for review ID %d: %v", reviewToAudit.ReviewID, auditErr)
+	} else {
+		r.log.WithContext(auditCtx).Infof("Async AI audit successful for review ID: %d", reviewToAudit.ReviewID)
 	}
 }
 
@@ -90,11 +153,15 @@ func (r *reviewRepo) SaveReply(ctx context.Context, reply *model.ReviewReplyInfo
 	// 1.2 水平越权校验：商家不能回复其他商家的评论
 	review, err := r.data.q.ReviewInfo.WithContext(ctx).Where(r.data.q.ReviewInfo.ReviewID.Eq(reply.ReviewID)).First()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("评论 (ID: %d) 不存在，无法回复", reply.ReviewID)
 	}
+
+	// 1.1 检查是否已经回复
 	if review.HasReply == 1 {
-		return nil, errors.New("已回复的评论不能重复回复")
+		return nil, errors.New("该评论已回复，不能重复回复")
 	}
+
+	// 1.2 检查商家ID是否匹配
 	if review.StoreID != reply.StoreID {
 		return nil, errors.New("商家不能回复其他商家的评论")
 	}
@@ -180,13 +247,14 @@ func (r *reviewRepo) AppealReview(ctx context.Context, param *biz.AppealReviewPa
 	// 1.1 评论存在性校验
 	review, err := r.GetReviewByReviewID(ctx, param.ReviewID)
 	if err != nil {
-		return nil, errors.New("无法获取评论信息")
+		return nil, fmt.Errorf("评论 (ID: %d) 不存在，无法申诉", param.ReviewID)
 	}
 	// 1.2 权限校验：商家只能申诉自己店铺的评论
 	if review.StoreID != param.StoreID {
 		return nil, errors.New("商家不能申诉其他商家的评论")
 	}
-	// 1.3 申诉状态校验：一个评论只能有一条申诉，在待审核状态时可以更新申诉，其他状态不能更新申诉
+
+	// 1.3 申诉状态校验：只有待审核(10)状态的申诉可以更新申诉，其他状态不允许重复申诉
 	existingAppeals, err := r.data.q.ReviewAppealInfo.WithContext(ctx).Where(r.data.q.ReviewAppealInfo.ReviewID.Eq(param.ReviewID)).Find()
 	if err != nil {
 		return nil, errors.New("查询申诉记录失败")

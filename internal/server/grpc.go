@@ -2,6 +2,8 @@ package server
 
 import (
 	v1 "review/api/review/v1"
+	ai_v1 "review/api/ai/v1"
+	user_v1 "review/api/user/v1"
 	"review/internal/conf"
 	"review/internal/service"
 
@@ -12,7 +14,7 @@ import (
 )
 
 // NewGRPCServer new a gRPC server.
-func NewGRPCServer(c *conf.Server, review *service.ReviewService, logger log.Logger) *grpc.Server {
+func NewGRPCServer(c *conf.Server, review *service.ReviewService, aiAgent *service.AIAgentService, user *service.UserService, logger log.Logger) *grpc.Server {
 	var opts = []grpc.ServerOption{
 		grpc.Middleware(
 			recovery.Recovery(),
@@ -30,5 +32,7 @@ func NewGRPCServer(c *conf.Server, review *service.ReviewService, logger log.Log
 	}
 	srv := grpc.NewServer(opts...)
 	v1.RegisterReviewServer(srv, review)
+	ai_v1.RegisterAIAgentServer(srv, aiAgent)
+	user_v1.RegisterUserServer(srv, user)
 	return srv
 }

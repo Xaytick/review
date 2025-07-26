@@ -15,7 +15,15 @@ import (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, NewReviewRepo, NewDB, NewESClient, NewRedisClient, NewAIClient)
+var ProviderSet = wire.NewSet(
+	NewData,
+	NewReviewRepo,
+	NewUserRepo,
+	NewDB,
+	NewESClient,
+	NewRedisClient,
+	NewAIClient,
+)
 
 // Data .
 type Data struct {

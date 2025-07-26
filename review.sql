@@ -11,8 +11,33 @@ USE reviewdb;
 DROP TABLE IF EXISTS review_appeal_info;
 DROP TABLE IF EXISTS review_reply_info; 
 DROP TABLE IF EXISTS review_info;
+DROP TABLE IF EXISTS stores;
+DROP TABLE IF EXISTS users;
 
-CREATE TABLE review_info (
+-- 创建用户表
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role ENUM('customer', 'merchant', 'reviewer') NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 店铺表
+CREATE TABLE IF NOT EXISTS stores (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    store_id BIGINT UNSIGNED NOT NULL UNIQUE,
+    user_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 评论表
+CREATE TABLE IF NOT EXISTS review_info (
   `id` bigint(32) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `create_by` varchar(48) NOT NULL DEFAULT '' COMMENT '创建人',
   `update_by` varchar(48) NOT NULL DEFAULT '' COMMENT '更新人',
@@ -64,43 +89,11 @@ CURRENT_TIMESTAMP COMMENT '更新时间',
 `reply_id` bigint(32) NOT NULL DEFAULT '0' COMMENT '回复id',
 `review_id` bigint(32) NOT NULL DEFAULT '0' COMMENT '评价id',
 `store_id` bigint(32) NOT NULL DEFAULT '0' COMMENT '店铺id',
-`content` varchar(512) NOT NULL COMMENT '评价内容',
-`pic_info` varchar(1024) NOT NULL DEFAULT '' COMMENT '媒体信息：图⽚',
-`video_info` varchar(1024) NOT NULL DEFAULT '' COMMENT '媒体信息：视频',
-`ext_json` varchar(1024) NOT NULL DEFAULT '' COMMENT '信息扩展',
-`ctrl_json` varchar(1024) NOT NULL DEFAULT '' COMMENT '控制扩展',
-PRIMARY KEY (`id`),
-KEY `idx_delete_at` (`delete_at`) COMMENT '逻辑删除索引',
-UNIQUE KEY `uk_reply_id` (`reply_id`) COMMENT '回复id索引',
-KEY `idx_review_id` (`review_id`) COMMENT '评价id索引',
-KEY `idx_store_id` (`store_id`) COMMENT '店铺id索引'
-)ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评价商家回复表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='回复信息表';
 
 
-CREATE TABLE review_appeal_info (
-`id` bigint(32) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
-`create_by` varchar(48) NOT NULL DEFAULT '' COMMENT '创建⽅标识',
-`update_by` varchar(48) NOT NULL DEFAULT '' COMMENT '更新⽅标识',
-`create_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-`update_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE
-CURRENT_TIMESTAMP COMMENT '更新时间',
-`delete_at` timestamp COMMENT '逻辑删除标记',
-`version` int(10) unsigned NOT NULL DEFAULT '0' COMMENT '乐观锁标记',
-`appeal_id` bigint(32) NOT NULL DEFAULT '0' COMMENT '回复id',
-`review_id` bigint(32) NOT NULL DEFAULT '0' COMMENT '评价id',
-`store_id` bigint(32) NOT NULL DEFAULT '0' COMMENT '店铺id',
-`status` tinyint(4) NOT NULL DEFAULT '10' COMMENT '状态:10待审核；20申诉通过；30申诉驳回',
-`reason` varchar(255) NOT NULL COMMENT '申诉原因类别',
-`content` varchar(255) NOT NULL COMMENT '申诉内容描述',
-`pic_info` varchar(1024) NOT NULL DEFAULT '' COMMENT '媒体信息：图⽚',
-`video_info` varchar(1024) NOT NULL DEFAULT '' COMMENT '媒体信息：视频',
-`op_remarks` varchar(512) NOT NULL DEFAULT '' COMMENT '运营备注',
-`op_user` varchar(64) NOT NULL DEFAULT '' COMMENT '运营者标识',
-`ext_json` varchar(1024) NOT NULL DEFAULT '' COMMENT '信息扩展',
-`ctrl_json` varchar(1024) NOT NULL DEFAULT '' COMMENT '控制扩展',
-PRIMARY KEY (`id`),
-KEY `idx_delete_at` (`delete_at`) COMMENT '逻辑删除索引',
-KEY `idx_appeal_id` (`appeal_id`) COMMENT '申诉id索引',
-UNIQUE KEY `uk_review_id` (`review_id`) COMMENT '评价id索引',
-KEY `idx_store_id` (`store_id`) COMMENT '店铺id索引'
-)ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评价商家申诉表';
+
+
+
+
+

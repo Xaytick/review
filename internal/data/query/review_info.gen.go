@@ -65,42 +65,41 @@ func newReviewInfo(db *gorm.DB, opts ...gen.DOOption) reviewInfo {
 	return _reviewInfo
 }
 
-// reviewInfo 评论信息表
 type reviewInfo struct {
 	reviewInfoDo reviewInfoDo
 
 	ALL            field.Asterisk
-	ID             field.Int64  // 主键ID
-	CreateBy       field.String // 创建人
-	UpdateBy       field.String // 更新人
-	CreateAt       field.Time   // 创建时间
-	UpdateAt       field.Time   // 更新时间
-	DeleteAt       field.Time   // 删除时间
-	Version        field.Int32  // 版本号
-	ReviewID       field.Int64  // 评论ID
-	Content        field.String // 评论内容
-	Score          field.Int32  // 评分
-	ServiceScore   field.Int32  // 服务评分
-	ExpressScore   field.Int32  // 快递评分
-	HasMedia       field.Int32  // 是否有媒体
-	OrderID        field.Int64  // 订单ID
-	SkuID          field.Int64  // SKU ID
-	SpuID          field.Int64  // SPU ID
-	StoreID        field.Int64  // 店铺ID
-	UserID         field.Int64  // 用户ID
-	Anonymous      field.Int32  // 是否匿名
-	Tags           field.String // 标签JSON
-	PicInfo        field.String // 图片信息
-	VideoInfo      field.String // 视频信息
-	Status         field.Int32  // 状态
-	IsDefault      field.Int32  // 是否默认
-	HasReply       field.Int32  // 是否有回复
-	OpReason       field.String // 操作原因
-	OpRemarks      field.String // 操作备注
-	OpUser         field.String // 操作用户
-	GoodsSnapshoot field.String // 商品快照
-	ExtJSON        field.String // 扩展JSON
-	CtrlJSON       field.String // 控制JSON
+	ID             field.Int64 // ID
+	CreateBy       field.String
+	UpdateBy       field.String
+	CreateAt       field.Time
+	UpdateAt       field.Time
+	DeleteAt       field.Time
+	Version        field.Int32
+	ReviewID       field.Int64 // ID
+	Content        field.String
+	Score          field.Int32
+	ServiceScore   field.Int32
+	ExpressScore   field.Int32
+	HasMedia       field.Int32
+	OrderID        field.Int64 // ID
+	SkuID          field.Int64 // SKU ID
+	SpuID          field.Int64 // SPU ID
+	StoreID        field.Int64 // ID
+	UserID         field.Int64 // ID
+	Anonymous      field.Int32
+	Tags           field.String // JSON
+	PicInfo        field.String
+	VideoInfo      field.String
+	Status         field.Int32
+	IsDefault      field.Int32
+	HasReply       field.Int32
+	OpReason       field.String
+	OpRemarks      field.String
+	OpUser         field.String
+	GoodsSnapshoot field.String
+	ExtJSON        field.String // JSON
+	CtrlJSON       field.String // JSON
 
 	fieldMap map[string]field.Expr
 }

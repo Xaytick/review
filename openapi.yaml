@@ -273,6 +273,129 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.review.v1.GetReviewReply'
+    /v1/user/list:
+        get:
+            tags:
+                - User
+            description: 获取用户列表
+            operationId: User_GetUserList
+            parameters:
+                - name: offset
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetUserListReply'
+    /v1/user/login:
+        post:
+            tags:
+                - User
+            description: 用户登录
+            operationId: User_Login
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.LoginRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.LoginReply'
+    /v1/user/register:
+        post:
+            tags:
+                - User
+            description: 用户注册
+            operationId: User_Register
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.RegisterRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.RegisterReply'
+    /v1/user/{userID}:
+        get:
+            tags:
+                - User
+            description: 获取用户信息
+            operationId: User_GetUserInfo
+            parameters:
+                - name: userID
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetUserInfoReply'
+        put:
+            tags:
+                - User
+            description: 更新用户信息
+            operationId: User_UpdateUserInfo
+            parameters:
+                - name: userID
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.UpdateUserInfoRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.UpdateUserInfoReply'
+        delete:
+            tags:
+                - User
+            description: 删除用户
+            operationId: User_DeleteUser
+            parameters:
+                - name: userID
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.DeleteUserReply'
 components:
     schemas:
         api.ai.v1.ChatReply:
@@ -558,6 +681,92 @@ components:
                     type: integer
                     format: int32
             description: 评论信息
+        api.user.v1.DeleteUserReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.user.v1.GetUserInfoReply:
+            type: object
+            properties:
+                userInfo:
+                    $ref: '#/components/schemas/api.user.v1.UserInfo'
+                message:
+                    type: string
+        api.user.v1.GetUserListReply:
+            type: object
+            properties:
+                users:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.UserInfo'
+                total:
+                    type: string
+        api.user.v1.LoginReply:
+            type: object
+            properties:
+                token:
+                    type: string
+                message:
+                    type: string
+        api.user.v1.LoginRequest:
+            type: object
+            properties:
+                username:
+                    type: string
+                password:
+                    type: string
+        api.user.v1.RegisterReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.user.v1.RegisterRequest:
+            type: object
+            properties:
+                username:
+                    type: string
+                password:
+                    type: string
+                email:
+                    type: string
+                role:
+                    type: string
+        api.user.v1.UpdateUserInfoReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.user.v1.UpdateUserInfoRequest:
+            type: object
+            properties:
+                userID:
+                    type: string
+                username:
+                    type: string
+                email:
+                    type: string
+        api.user.v1.UserInfo:
+            type: object
+            properties:
+                userID:
+                    type: string
+                username:
+                    type: string
+                email:
+                    type: string
+                role:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
 tags:
     - name: AIAgent
       description: AI Agent 服务
@@ -567,3 +776,5 @@ tags:
       description: 运营端服务
     - name: Review
       description: 定义评论服务
+    - name: User
+      description: 定义用户服务

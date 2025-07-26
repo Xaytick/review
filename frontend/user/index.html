@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 500px;
+        }
+        .nav-tabs .nav-link {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="container mt-5">
+        <ul class="nav nav-tabs">
+            <li class="nav-item">
+                <a class="nav-link" :class="{ active: activeTab === 'register' }" @click="activeTab = 'register'">Register</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" :class="{ active: activeTab === 'login' }" @click="activeTab = 'login'">Login</a>
+            </li>
+        </ul>
+
+        <div class="card">
+            <div class="card-body">
+                <!-- Register Form -->
+                <div v-if="activeTab === 'register'">
+                    <h4 class="card-title text-center">Create Account</h4>
+                    <form @submit.prevent="register">
+                        <div class="mb-3">
+                            <label for="regUsername" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="regUsername" v-model="registerForm.username" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="regEmail" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="regEmail" v-model="registerForm.email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="regPassword" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="regPassword" v-model="registerForm.password" required>
+                        </div>
+                         <div class="mb-3">
+                            <label for="regRole" class="form-label">Role</label>
+                            <select class="form-select" id="regRole" v-model="registerForm.role" required>
+                                <option value="customer">Customer</option>
+                                <option value="merchant">Merchant</option>
+                                <option value="reviewer">Reviewer</option>
+                            </select>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">Register</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Login Form -->
+                <div v-if="activeTab === 'login'">
+                    <h4 class="card-title text-center">Login</h4>
+                     <form @submit.prevent="login">
+                        <div class="mb-3">
+                            <label for="loginUsername" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="loginUsername" v-model="loginForm.username" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="loginPassword" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="loginPassword" v-model="loginForm.password" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-success">Login</button>
+                        </div>
+                    </form>
+                </div>
+                
+                <div v-if="message" class="alert mt-3" :class="isError ? 'alert-danger' : 'alert-success'" role="alert">
+                    {{ message }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+    <script>
+        const { createApp } = Vue
+
+        createApp({
+            data() {
+                return {
+                    activeTab: 'register',
+                    registerForm: {
+                        username: '',
+                        password: '',
+                        email: '',
+                        role: 'customer'
+                    },
+                    loginForm: {
+                        username: '',
+                        password: ''
+                    },
+                    message: '',
+                    isError: false
+                }
+            },
+            methods: {
+                async register() {
+                    this.clearMessage();
+                    try {
+                        const response = await axios.post('/v1/user/register', {
+                            username: this.registerForm.username,
+                            password: this.registerForm.password,
+                            email: this.registerForm.email,
+                            role: this.registerForm.role
+                        });
+                        this.showMessage('Registration successful! You can now log in.', false);
+                        this.activeTab = 'login';
+                        // Clear form
+                        this.registerForm.username = '';
+                        this.registerForm.password = '';
+                        this.registerForm.email = '';
+
+                    } catch (error) {
+                        const errorMsg = error.response?.data?.message || 'Registration failed.';
+                        this.showMessage(errorMsg, true);
+                    }
+                },
+                async login() {
+                    this.clearMessage();
+                    try {
+                        const response = await axios.post('/v1/user/login', {
+                            username: this.loginForm.username,
+                            password: this.loginForm.password
+                        });
+                        
+                        const token = response.data.token;
+                        localStorage.setItem('jwt_token', token);
+                        this.showMessage('Login successful! Redirecting...', false);
+                        
+                        // Redirect to dashboard
+                        window.location.href = '/dashboard/index.html';
+
+                    } catch (error) {
+                        const errorMsg = error.response?.data?.message || 'Login failed.';
+                        this.showMessage(errorMsg, true);
+                    }
+                },
+                showMessage(msg, isError) {
+                    this.message = msg;
+                    this.isError = isError;
+                },
+                clearMessage() {
+                    this.message = '';
+                    this.isError = false;
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html> 

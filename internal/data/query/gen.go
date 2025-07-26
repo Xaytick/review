@@ -20,6 +20,8 @@ var (
 	ReviewAppealInfo *reviewAppealInfo
 	ReviewInfo       *reviewInfo
 	ReviewReplyInfo  *reviewReplyInfo
+	Store            *store
+	User             *user
 )
 
 func SetDefault(db *gorm.DB, opts ...gen.DOOption) {
@@ -27,6 +29,8 @@ func SetDefault(db *gorm.DB, opts ...gen.DOOption) {
 	ReviewAppealInfo = &Q.ReviewAppealInfo
 	ReviewInfo = &Q.ReviewInfo
 	ReviewReplyInfo = &Q.ReviewReplyInfo
+	Store = &Q.Store
+	User = &Q.User
 }
 
 func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
@@ -35,6 +39,8 @@ func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
 		ReviewAppealInfo: newReviewAppealInfo(db, opts...),
 		ReviewInfo:       newReviewInfo(db, opts...),
 		ReviewReplyInfo:  newReviewReplyInfo(db, opts...),
+		Store:            newStore(db, opts...),
+		User:             newUser(db, opts...),
 	}
 }
 
@@ -44,6 +50,8 @@ type Query struct {
 	ReviewAppealInfo reviewAppealInfo
 	ReviewInfo       reviewInfo
 	ReviewReplyInfo  reviewReplyInfo
+	Store            store
+	User             user
 }
 
 func (q *Query) Available() bool { return q.db != nil }
@@ -54,6 +62,8 @@ func (q *Query) clone(db *gorm.DB) *Query {
 		ReviewAppealInfo: q.ReviewAppealInfo.clone(db),
 		ReviewInfo:       q.ReviewInfo.clone(db),
 		ReviewReplyInfo:  q.ReviewReplyInfo.clone(db),
+		Store:            q.Store.clone(db),
+		User:             q.User.clone(db),
 	}
 }
 
@@ -71,6 +81,8 @@ func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 		ReviewAppealInfo: q.ReviewAppealInfo.replaceDB(db),
 		ReviewInfo:       q.ReviewInfo.replaceDB(db),
 		ReviewReplyInfo:  q.ReviewReplyInfo.replaceDB(db),
+		Store:            q.Store.replaceDB(db),
+		User:             q.User.replaceDB(db),
 	}
 }
 
@@ -78,6 +90,8 @@ type queryCtx struct {
 	ReviewAppealInfo IReviewAppealInfoDo
 	ReviewInfo       IReviewInfoDo
 	ReviewReplyInfo  IReviewReplyInfoDo
+	Store            IStoreDo
+	User             IUserDo
 }
 
 func (q *Query) WithContext(ctx context.Context) *queryCtx {
@@ -85,6 +99,8 @@ func (q *Query) WithContext(ctx context.Context) *queryCtx {
 		ReviewAppealInfo: q.ReviewAppealInfo.WithContext(ctx),
 		ReviewInfo:       q.ReviewInfo.WithContext(ctx),
 		ReviewReplyInfo:  q.ReviewReplyInfo.WithContext(ctx),
+		Store:            q.Store.WithContext(ctx),
+		User:             q.User.WithContext(ctx),
 	}
 }
 
