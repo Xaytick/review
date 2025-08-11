@@ -6,25 +6,6 @@ info:
     title: ""
     version: 0.0.1
 paths:
-    /ai/v1/chat:
-        post:
-            tags:
-                - AIAgent
-            description: 与 AI 聊天
-            operationId: AIAgent_Chat
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/api.ai.v1.ChatRequest'
-                required: true
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/api.ai.v1.ChatReply'
     /b/v1/review/appeal:
         post:
             tags:
@@ -101,6 +82,44 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.operation.v1.AuditReviewReply'
+    /v1/agent/calltool:
+        post:
+            tags:
+                - AgentService
+            description: CallTool 执行一个具体的工具调用
+            operationId: AgentService_CallTool
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.ai.v1.CallToolRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.ai.v1.CallToolResponse'
+    /v1/agent/process:
+        post:
+            tags:
+                - AgentService
+            description: Process 接收用户的自然语言输入，经过LLM处理，返回AI的思考和行动计划
+            operationId: AgentService_Process
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.ai.v1.ProcessRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.ai.v1.ProcessResponse'
     /v1/appeal/audit:
         post:
             tags:
@@ -120,6 +139,36 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.review.v1.AuditAppealReply'
+    /v1/appeals/status/{status}:
+        get:
+            tags:
+                - Review
+            description: 根据申诉状态获取申诉列表（分页）
+            operationId: Review_ListAppealsByStatus
+            parameters:
+                - name: status
+                  in: path
+                  required: true
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.review.v1.ListAppealsByStatusReply'
     /v1/review:
         post:
             tags:
@@ -273,6 +322,36 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.review.v1.GetReviewReply'
+    /v1/reviews/status/{status}:
+        get:
+            tags:
+                - Review
+            description: 根据状态获取评论列表（分页）
+            operationId: Review_ListReviewsByStatus
+            parameters:
+                - name: status
+                  in: path
+                  required: true
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.review.v1.ListReviewByUserIDReply'
     /v1/user/list:
         get:
             tags:
@@ -398,22 +477,58 @@ paths:
                                 $ref: '#/components/schemas/api.user.v1.DeleteUserReply'
 components:
     schemas:
-        api.ai.v1.ChatReply:
+        api.ai.v1.CallToolRequest:
             type: object
             properties:
-                response:
+                toolName:
                     type: string
-            description: 聊天回复
-        api.ai.v1.ChatRequest:
+                    description: 要调用的工具名称，必须与 ProcessResponse 中返回的 tool_name 一致
+                arguments:
+                    type: string
+                    description: 调用工具所需的参数，以JSON字符串形式提供
+                originalQuery:
+                    type: string
+                    description: 用户的原始查询，用于上下文感知的结果总结
+        api.ai.v1.CallToolResponse:
             type: object
             properties:
-                prompt:
+                result:
                     type: string
-                context:
-                    type: array
-                    items:
-                        type: string
-            description: 聊天请求
+                    description: 工具执行后的结果，通常也是一个JSON字符串
+        api.ai.v1.ProcessRequest:
+            type: object
+            properties:
+                query:
+                    type: string
+                    description: 用户的自然语言查询
+                sessionId:
+                    type: string
+                    description: 当前会话ID，用于保持上下文
+        api.ai.v1.ProcessResponse:
+            type: object
+            properties:
+                thought:
+                    type: string
+                    description: AI的思考过程，可以用于调试或展示
+                toolCall:
+                    allOf:
+                        - $ref: '#/components/schemas/api.ai.v1.ToolCall'
+                    description: AI决定调用的工具。如果此字段存在，通常表示需要客户端确认并执行下一步。
+                finalAnswer:
+                    type: string
+                    description: 如果AI认为不需要调用工具，可以直接给出最终答复
+        api.ai.v1.ToolCall:
+            type: object
+            properties:
+                toolName:
+                    type: string
+                    description: 工具的名称, e.g., "CreateReview"
+                arguments:
+                    type: string
+                    description: |-
+                        调用工具所需的参数，以JSON字符串形式提供
+                         e.g., "{\"storeID\": 123, \"content\": \"this is a great product\"}"
+            description: ToolCall 代表一个待执行的工具调用
         api.business.v1.AppealReviewReply:
             type: object
             properties:
@@ -504,6 +619,27 @@ components:
                 opRemarks:
                     type: string
             description: 审核评论请求
+        api.review.v1.AppealInfo:
+            type: object
+            properties:
+                appealID:
+                    type: string
+                reviewID:
+                    type: string
+                storeID:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                reason:
+                    type: string
+                content:
+                    type: string
+                picInfo:
+                    type: string
+                videoInfo:
+                    type: string
+            description: 申诉信息
         api.review.v1.AppealReviewReply:
             type: object
             properties:
@@ -616,6 +752,14 @@ components:
                 reviewInfo:
                     $ref: '#/components/schemas/api.review.v1.ReviewInfo'
             description: 获取评论回复
+        api.review.v1.ListAppealsByStatusReply:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.review.v1.AppealInfo'
+            description: 根据申诉状态获取申诉列表（分页）回复
         api.review.v1.ListReviewByStoreIDReply:
             type: object
             properties:
@@ -768,8 +912,8 @@ components:
                 updatedAt:
                     type: string
 tags:
-    - name: AIAgent
-      description: AI Agent 服务
+    - name: AgentService
+      description: AgentService 是AI助手的核心服务
     - name: Business
       description: 商家端服务
     - name: Operation

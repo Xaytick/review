@@ -1,166 +1,171 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Management</title>
+    <title>欢迎</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
             background-color: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
         }
-        .container {
-            max-width: 500px;
+        .auth-card {
+            width: 100%;
+            max-width: 450px;
+            border: none;
+            border-radius: 0.75rem;
+            box-shadow: 0 0.5rem 1.5rem rgba(0,0,0,0.1);
         }
         .nav-tabs .nav-link {
             cursor: pointer;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: #6c757d;
+        }
+        .nav-tabs .nav-link.active {
+            border-bottom-color: var(--bs-primary);
+            color: var(--bs-primary);
+            font-weight: 500;
+        }
+        .card-body {
+            padding: 2.5rem;
+        }
+        .btn-custom {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
         }
     </style>
 </head>
 <body>
-    <div id="app" class="container mt-5">
-        <ul class="nav nav-tabs">
-            <li class="nav-item">
-                <a class="nav-link" :class="{ active: activeTab === 'register' }" @click="activeTab = 'register'">Register</a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" :class="{ active: activeTab === 'login' }" @click="activeTab = 'login'">Login</a>
-            </li>
-        </ul>
 
-        <div class="card">
-            <div class="card-body">
-                <!-- Register Form -->
-                <div v-if="activeTab === 'register'">
-                    <h4 class="card-title text-center">Create Account</h4>
-                    <form @submit.prevent="register">
-                        <div class="mb-3">
-                            <label for="regUsername" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="regUsername" v-model="registerForm.username" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="regEmail" class="form-label">Email</label>
-                            <input type="email" class="form-control" id="regEmail" v-model="registerForm.email" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="regPassword" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="regPassword" v-model="registerForm.password" required>
-                        </div>
-                         <div class="mb-3">
-                            <label for="regRole" class="form-label">Role</label>
-                            <select class="form-select" id="regRole" v-model="registerForm.role" required>
-                                <option value="customer">Customer</option>
-                                <option value="merchant">Merchant</option>
-                                <option value="reviewer">Reviewer</option>
-                            </select>
-                        </div>
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary">Register</button>
-                        </div>
-                    </form>
-                </div>
+<div id="app" class="auth-card">
+    <div class="card">
+        <div class="card-header bg-white pt-3 border-0">
+            <ul class="nav nav-tabs card-header-tabs">
+                <li class="nav-item flex-fill text-center">
+                    <a class="nav-link" :class="{ active: activeForm === 'login' }" @click="switchForm('login')">登录</a>
+                </li>
+                <li class="nav-item flex-fill text-center">
+                    <a class="nav-link" :class="{ active: activeForm === 'register' }" @click="switchForm('register')">注册</a>
+                </li>
+            </ul>
+        </div>
+        <div class="card-body">
+            <!-- Login Form -->
+            <div v-if="activeForm === 'login'">
+                <h4 class="text-center mb-4">用户登录</h4>
+                <div v-if="loginError" class="alert alert-danger p-2 text-center small">{{ loginError }}</div>
+                <form @submit.prevent="login">
+                    <div class="mb-3">
+                        <label for="loginUsername" class="form-label">用户名</label>
+                        <input type="text" class="form-control" id="loginUsername" v-model="loginForm.username" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="loginPassword" class="form-label">密码</label>
+                        <input type="password" class="form-control" id="loginPassword" v-model="loginForm.password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-custom">登录</button>
+                </form>
+            </div>
 
-                <!-- Login Form -->
-                <div v-if="activeTab === 'login'">
-                    <h4 class="card-title text-center">Login</h4>
-                     <form @submit.prevent="login">
-                        <div class="mb-3">
-                            <label for="loginUsername" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="loginUsername" v-model="loginForm.username" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="loginPassword" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="loginPassword" v-model="loginForm.password" required>
-                        </div>
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-success">Login</button>
-                        </div>
-                    </form>
-                </div>
-                
-                <div v-if="message" class="alert mt-3" :class="isError ? 'alert-danger' : 'alert-success'" role="alert">
-                    {{ message }}
-                </div>
+            <!-- Register Form -->
+            <div v-if="activeForm === 'register'">
+                <h4 class="text-center mb-4">新用户注册</h4>
+                <div v-if="registerError" class="alert alert-danger p-2 text-center small">{{ registerError }}</div>
+                <div v-if="registerSuccess" class="alert alert-success p-2 text-center small">{{ registerSuccess }}</div>
+                <form @submit.prevent="register">
+                    <div class="mb-3">
+                        <label for="registerUsername" class="form-label">用户名</label>
+                        <input type="text" class="form-control" id="registerUsername" v-model="registerForm.username" required>
+                    </div>
+                     <div class="mb-3">
+                        <label for="registerEmail" class="form-label">邮箱</label>
+                        <input type="email" class="form-control" id="registerEmail" v-model="registerForm.email" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="registerPassword" class="form-label">密码</label>
+                        <input type="password" class="form-control" id="registerPassword" v-model="registerForm.password" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="registerRole" class="form-label">角色</label>
+                        <select class="form-select" id="registerRole" v-model="registerForm.role" required>
+                            <option value="customer">顾客</option>
+                            <option value="merchant">商家</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-custom">注册</button>
+                </form>
             </div>
         </div>
     </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/vue@3"></script>
-    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.2.47/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios@1.4.0/dist/axios.min.js"></script>
 
-    <script>
-        const { createApp } = Vue
+<script>
+    const { createApp } = Vue
 
-        createApp({
-            data() {
-                return {
-                    activeTab: 'register',
-                    registerForm: {
-                        username: '',
-                        password: '',
-                        email: '',
-                        role: 'customer'
-                    },
-                    loginForm: {
-                        username: '',
-                        password: ''
-                    },
-                    message: '',
-                    isError: false
+    createApp({
+        data() {
+            return {
+                activeForm: 'login',
+                loginForm: { username: '', password: '' },
+                registerForm: { username: '', email: '', password: '', role: 'customer' },
+                loginError: '',
+                registerError: '',
+                registerSuccess: '',
+                redirectUrl: null
+            }
+        },
+        created() {
+            const urlParams = new URLSearchParams(window.location.search);
+            this.redirectUrl = urlParams.get('redirect');
+        },
+        methods: {
+            switchForm(form) {
+                this.activeForm = form;
+                this.loginError = '';
+                this.registerError = '';
+                this.registerSuccess = '';
+            },
+            async login() {
+                this.loginError = '';
+                try {
+                    const response = await axios.post('/v1/user/login', this.loginForm);
+                    if (response.data.token) {
+                        localStorage.setItem('jwt_token', response.data.token);
+                        window.location.href = this.redirectUrl || '/dashboard/';
+                    } else {
+                        this.loginError = response.data.message || '登录失败';
+                    }
+                } catch (error) {
+                    this.loginError = error.response?.data?.message || '登录时发生错误';
                 }
             },
-            methods: {
-                async register() {
-                    this.clearMessage();
-                    try {
-                        const response = await axios.post('/v1/user/register', {
-                            username: this.registerForm.username,
-                            password: this.registerForm.password,
-                            email: this.registerForm.email,
-                            role: this.registerForm.role
-                        });
-                        this.showMessage('Registration successful! You can now log in.', false);
-                        this.activeTab = 'login';
-                        // Clear form
-                        this.registerForm.username = '';
-                        this.registerForm.password = '';
-                        this.registerForm.email = '';
-
-                    } catch (error) {
-                        const errorMsg = error.response?.data?.message || 'Registration failed.';
-                        this.showMessage(errorMsg, true);
+            async register() {
+                this.registerError = '';
+                this.registerSuccess = '';
+                try {
+                    const response = await axios.post('/v1/user/register', this.registerForm);
+                     if (response.data.success) {
+                        this.registerSuccess = '注册成功！请切换到登录页面进行登录。';
+                        this.registerForm = { username: '', email: '', password: '', role: 'customer' }; // Clear form
+                    } else {
+                        this.registerError = response.data.message || '注册失败';
                     }
-                },
-                async login() {
-                    this.clearMessage();
-                    try {
-                        const response = await axios.post('/v1/user/login', {
-                            username: this.loginForm.username,
-                            password: this.loginForm.password
-                        });
-                        
-                        const token = response.data.token;
-                        localStorage.setItem('jwt_token', token);
-                        this.showMessage('Login successful! Redirecting...', false);
-                        
-                        // Redirect to dashboard
-                        window.location.href = '/dashboard/index.html';
-
-                    } catch (error) {
-                        const errorMsg = error.response?.data?.message || 'Login failed.';
-                        this.showMessage(errorMsg, true);
-                    }
-                },
-                showMessage(msg, isError) {
-                    this.message = msg;
-                    this.isError = isError;
-                },
-                clearMessage() {
-                    this.message = '';
-                    this.isError = false;
+                } catch (error) {
+                    this.registerError = error.response?.data?.message || '注册时发生错误';
                 }
             }
-        }).mount('#app')
-    </script>
+        }
+    }).mount('#app')
+</script>
+
 </body>
-</html> 
+</html>

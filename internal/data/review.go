@@ -404,6 +404,26 @@ func (r *reviewRepo) ListReviewByUserID(ctx context.Context, userID int64, offse
 	return r.ListReviewByUserID1(ctx, userID, offset, limit)
 }
 
+func (r *reviewRepo) ListReviewsByStatus(ctx context.Context, status int32, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+	// For simplicity, we create a new function for ES query by status, bypassing the generic cache layer for now.
+	// A more robust implementation might involve a more flexible caching key.
+	return r.listReviewsByStatusFromES(ctx, status, offset, limit)
+}
+
+// ListAppealsByStatus lists appeal records by status with pagination.
+func (r *reviewRepo) ListAppealsByStatus(ctx context.Context, status int32, offset int32, limit int32) ([]*model.ReviewAppealInfo, error) {
+	// Directly query DB for now. If needed, we can add ES indexing later for appeals.
+	appeals, err := r.data.q.ReviewAppealInfo.WithContext(ctx).
+		Where(r.data.q.ReviewAppealInfo.Status.Eq(status)).
+		Offset(int(offset)).
+		Limit(int(limit)).
+		Find()
+	if err != nil {
+		return nil, err
+	}
+	return appeals, nil
+}
+
 var g = singleflight.Group{}
 
 // 升级版带缓存的查询函数, 根据商家ID获取评论列表（分页）
@@ -519,6 +539,8 @@ func (r *reviewRepo) GetDataFromES(ctx context.Context, key string, target strin
 		fieldName = "store_id"
 	} else if target == "user" {
 		fieldName = "user_id"
+	} else if target == "status" {
+		fieldName = "status"
 	} else {
 		return nil, errors.New("invalid target")
 	}
@@ -552,6 +574,31 @@ func (r *reviewRepo) GetDataFromES(ctx context.Context, key string, target strin
 // 设置缓存
 func (r *reviewRepo) SetCache(ctx context.Context, key string, value []byte) error {
 	return r.data.rdb.Set(ctx, key, value, time.Second*60).Err()
+}
+
+// listReviewsByStatusFromES directly queries Elasticsearch for reviews by their status.
+func (r *reviewRepo) listReviewsByStatusFromES(ctx context.Context, status int32, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+
+	key := fmt.Sprintf("review:%d:%d:%d", status, offset, limit)
+	b, err := r.GetDataBySingleFlight(ctx, key, "status")
+	if err != nil {
+		return nil, err
+	}
+	hm := new(types.HitsMetadata)
+	if err := json.Unmarshal(b, hm); err != nil {
+		return nil, err
+	}
+	// 4. 反序列化
+	list := make([]*biz.MyReviewInfo, 0, hm.Total.Value)
+	for _, hit := range hm.Hits {
+		tmp := &biz.MyReviewInfo{}
+		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+			r.log.Errorf("es search result unmarshal error: %v", err)
+			continue
+		}
+		list = append(list, tmp)
+	}
+	return list, nil
 }
 
 // // 旧版不带缓存的查询函数

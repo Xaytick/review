@@ -1,7 +1,7 @@
 server:
   http:
-    addr: 0.0.0.0:8008
-    timeout: 15s
+    addr: 127.0.0.1:8522
+    timeout: 30s
   grpc:
     addr: 0.0.0.0:9009
     timeout: 15s

@@ -63,7 +63,7 @@ func (s *ReviewService) CreateReview(ctx context.Context, req *pb.CreateReviewRe
 		Content:      req.Content,
 		PicInfo:      req.PicInfo,
 		VideoInfo:    req.VideoInfo,
-		Status:       0,
+		Status:       10, // Default status to "Pending"
 		Anonymous:    anonymous,
 	})
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *ReviewService) ListReviewByStoreID(ctx context.Context, req *pb.ListRev
 	return &pb.ListReviewByStoreIDReply{List: list}, nil
 }
 
-// 根据用户ID获取评论列表（分页）
+// ListReviewByUserID 根据用户ID获取评论列表（分页）
 func (s *ReviewService) ListReviewByUserID(ctx context.Context, req *pb.ListReviewByUserIDRequest) (*pb.ListReviewByUserIDReply, error) {
 	fmt.Println("[service] ListReviewByUserID, req:", req)
 	// 调用biz层
@@ -242,4 +242,56 @@ func (s *ReviewService) ListReviewByUserID(ctx context.Context, req *pb.ListRevi
 		})
 	}
 	return &pb.ListReviewByUserIDReply{List: list}, nil
+}
+
+// ListReviewsByStatus retrieves a list of reviews by status with pagination.
+func (s *ReviewService) ListReviewsByStatus(ctx context.Context, req *pb.ListReviewsByStatusRequest) (*pb.ListReviewByUserIDReply, error) {
+	fmt.Println("[service] ListReviewsByStatus, req:", req)
+	// Call the biz layer
+	reviews, err := s.uc.ListReviewsByStatus(ctx, req.Status, req.Page, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	// Assemble the response
+	list := make([]*pb.ReviewInfo, 0, len(reviews))
+	for _, review := range reviews {
+		list = append(list, &pb.ReviewInfo{
+			ReviewID:     review.ReviewID,
+			UserID:       review.UserID,
+			OrderID:      review.OrderID,
+			StoreID:      review.StoreID,
+			Score:        review.Score,
+			ServiceScore: review.ServiceScore,
+			ExpressScore: review.ExpressScore,
+			Content:      review.Content,
+			PicInfo:      review.PicInfo,
+			VideoInfo:    review.VideoInfo,
+			Status:       review.Status,
+		})
+	}
+	// Note: We are reusing ListReviewByUserIDReply as the response message.
+	return &pb.ListReviewByUserIDReply{List: list}, nil
+}
+
+// ListAppealsByStatus retrieves a list of appeals by status with pagination.
+func (s *ReviewService) ListAppealsByStatus(ctx context.Context, req *pb.ListAppealsByStatusRequest) (*pb.ListAppealsByStatusReply, error) {
+	fmt.Println("[service] ListAppealsByStatus, req:", req)
+	appeals, err := s.uc.ListAppealsByStatus(ctx, req.Status, req.Page, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]*pb.AppealInfo, 0, len(appeals))
+	for _, a := range appeals {
+		list = append(list, &pb.AppealInfo{
+			AppealID:  a.AppealID,
+			ReviewID:  a.ReviewID,
+			StoreID:   a.StoreID,
+			Status:    a.Status,
+			Reason:    a.Reason,
+			Content:   a.Content,
+			PicInfo:   a.PicInfo,
+			VideoInfo: a.VideoInfo,
+		})
+	}
+	return &pb.ListAppealsByStatusReply{List: list}, nil
 }

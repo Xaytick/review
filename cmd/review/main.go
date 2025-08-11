@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"review/internal/conf"
+	"review/internal/service"
 	"review/pkg/snowflake"
 
 	"github.com/joho/godotenv"
@@ -37,7 +38,8 @@ func init() {
 	flag.StringVar(&flagconf, "conf", "../../configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, r registry.Registrar) *kratos.App {
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, r registry.Registrar,
+	review *service.ReviewService, user *service.UserService, agent *service.AgentService) *kratos.App {
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),

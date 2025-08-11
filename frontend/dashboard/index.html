@@ -6,7 +6,7 @@
     <title>User Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #f0f2f5; }
+        body { background-color: #ffffff; }
         .dashboard-header { background-color: #fff; padding: 1rem; border-bottom: 1px solid #dee2e6; }
         .dashboard-header h4 { margin-bottom: 0; }
         .welcome-message { font-size: 1.1rem; }
@@ -15,17 +15,32 @@
     </style>
 </head>
 <body>
-    <div id="app" class="container">
-        <div class="dashboard-header d-flex justify-content-between align-items-center mt-3">
-            <div>
-                <h4>Dashboard</h4>
-                <span class="welcome-message">Welcome, {{ username }}!</span>
+    <div id="app" class="container-fluid">
+        <!-- Global Navbar -->
+        <nav class="navbar navbar-expand-lg navbar-light bg-light mt-2 mb-3 rounded shadow-sm">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="/dashboard/index.html">Kratos Reviews</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                    <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                        <li class="nav-item">
+                            <a class="nav-link active" aria-current="page" href="/dashboard/index.html">Dashboard</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/agent/index.html">AI Agent</a>
+                        </li>
+                    </ul>
+                    <div class="d-flex align-items-center">
+                        <span class="me-2">{{ username }}</span>
+                        <span class="badge text-bg-primary text-capitalize">{{ role }}</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-3" @click="logout">Logout</button>
+                    </div>
+                </div>
             </div>
-            <div>
-                 <span class="badge rounded-pill text-bg-primary role-badge">{{ role }}</span>
-                 <button class="btn btn-sm btn-outline-secondary ms-2" @click="logout">Logout</button>
-            </div>
-        </div>
+        </nav>
+        
 
         <!-- Customer Panel -->
         <div v-if="role === 'customer'" class="card">
@@ -115,12 +130,73 @@
             <div class="card-header">Reviewer Actions</div>
             <div class="card-body">
                 <h5 class="card-title">Audit Center</h5>
-                <p class="card-text">Audit pending reviews and appeals.</p>
-                 <div class="input-group">
-                    <input type="text" class="form-control" placeholder="Enter Review or Appeal ID">
-                    <button class="btn btn-success">Approve</button>
-                    <button class="btn btn-danger">Reject</button>
-                </div>
+                <p class="card-text">Here you can audit pending reviews and appeals.</p>
+                <button class="btn btn-primary me-2" @click="fetchPendingReviews" :disabled="isLoadingPendingReviews">
+                    <span v-if="isLoadingPendingReviews" class="spinner-border spinner-border-sm"></span>
+                    {{ isLoadingPendingReviews ? 'Loading...' : 'Fetch Pending Reviews' }}
+                </button>
+                <button class="btn btn-outline-primary" @click="fetchPendingAppeals" :disabled="isLoadingPendingAppeals">
+                    <span v-if="isLoadingPendingAppeals" class="spinner-border spinner-border-sm"></span>
+                    {{ isLoadingPendingAppeals ? 'Loading...' : 'Fetch Pending Appeals' }}
+                </button>
+            </div>
+            <!-- Pending Reviews List -->
+            <div v-if="pendingReviewsError" class="alert alert-danger m-3">{{ pendingReviewsError }}</div>
+            <div v-if="pendingReviews.length > 0" class="card-body border-top">
+                <h6>Reviews Pending Your Audit</h6>
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th scope="col">Review ID</th>
+                            <th scope="col">User ID</th>
+                            <th scope="col">Store ID</th>
+                            <th scope="col">Content</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="review in pendingReviews" :key="review.reviewID">
+                            <th scope="row">{{ review.reviewID }}</th>
+                            <td>{{ review.userID }}</td>
+                            <td>{{ review.storeID }}</td>
+                            <td>{{ review.content.substring(0, 100) }}...</td>
+                            <td>
+                                <button class="btn btn-sm btn-success" @click="handleAudit(review.reviewID, true)">Approve</button>
+                                <button class="btn btn-sm btn-danger ms-2" @click="handleAudit(review.reviewID, false)">Reject</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pending Appeals List -->
+            <div v-if="pendingAppealsError" class="alert alert-danger m-3">{{ pendingAppealsError }}</div>
+            <div v-if="pendingAppeals.length > 0" class="card-body border-top">
+                <h6>Appeals Pending Your Audit</h6>
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th scope="col">Appeal ID</th>
+                            <th scope="col">Review ID</th>
+                            <th scope="col">Store ID</th>
+                            <th scope="col">Reason</th>
+                            <th scope="col">Content</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="appeal in pendingAppeals" :key="appeal.appealID">
+                            <th scope="row">{{ appeal.appealID }}</th>
+                            <td>{{ appeal.reviewID }}</td>
+                            <td>{{ appeal.storeID }}</td>
+                            <td>{{ (appeal.reason || '').substring(0, 40) }}{{ (appeal.reason && appeal.reason.length>40) ? '...' : '' }}</td>
+                            <td>{{ (appeal.content || '').substring(0, 60) }}{{ (appeal.content && appeal.content.length>60) ? '...' : '' }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-success" @click="handleAppealAudit(appeal.appealID, true)">Approve</button>
+                                <button class="btn btn-sm btn-danger ms-2" @click="handleAppealAudit(appeal.appealID, false)">Reject</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -270,6 +346,13 @@
                     isActionError: false,
                     replyModalInstance: null,
                     appealModalInstance: null,
+                    // Reviewer data
+                    pendingReviews: [],
+                    isLoadingPendingReviews: false,
+                    pendingReviewsError: '',
+                    pendingAppeals: [],
+                    isLoadingPendingAppeals: false,
+                    pendingAppealsError: '',
                     reviewForm: {
                         orderID: null,
                         storeID: null,
@@ -462,6 +545,72 @@
                         videoInfo: '',
                         anonymous: false
                     };
+                },
+                async fetchPendingReviews() {
+                    this.isLoadingPendingReviews = true;
+                    this.pendingReviewsError = '';
+                    this.pendingReviews = [];
+                    try {
+                        const response = await axios.get(`/v1/reviews/status/10?page=1&size=50`);
+                        this.pendingReviews = response.data.list || [];
+                        if (this.pendingReviews.length === 0) {
+                            this.pendingReviewsError = "No pending reviews found.";
+                        }
+                    } catch (error) {
+                        this.pendingReviewsError = error.response?.data?.message || 'Failed to fetch pending reviews.';
+                    } finally {
+                        this.isLoadingPendingReviews = false;
+                    }
+                },
+                async fetchPendingAppeals() {
+                    this.isLoadingPendingAppeals = true;
+                    this.pendingAppealsError = '';
+                    this.pendingAppeals = [];
+                    try {
+                        const response = await axios.get(`/v1/appeals/status/10?page=1&size=50`);
+                        this.pendingAppeals = response.data.list || [];
+                        if (this.pendingAppeals.length === 0) {
+                            this.pendingAppealsError = "No pending appeals found.";
+                        }
+                    } catch (error) {
+                        this.pendingAppealsError = error.response?.data?.message || 'Failed to fetch pending appeals.';
+                    } finally {
+                        this.isLoadingPendingAppeals = false;
+                    }
+                },
+                async handleAudit(reviewId, isApproved) {
+                    const status = isApproved ? 20 : 30; // 20: Approved, 30: Rejected
+                    const reason = isApproved ? 'Approved by reviewer' : 'Rejected by reviewer';
+                    
+                    try {
+                         await axios.put(`/v1/reviews/${reviewId}/audit`, {
+                            status: status,
+                            op_user: this.username,
+                            op_reason: reason,
+                        });
+
+                        // Refresh the list by removing the audited item
+                        this.pendingReviews = this.pendingReviews.filter(r => r.reviewID !== reviewId);
+                        
+                    } catch (error) {
+                        this.pendingReviewsError = `Failed to audit review #${reviewId}. ` + (error.response?.data?.message || '');
+                    }
+                }
+                ,
+                async handleAppealAudit(appealId, isApproved) {
+                    const status = isApproved ? 20 : 30; // 20: Appeal Approved, 30: Appeal Rejected
+                    const reason = isApproved ? 'Appeal approved by reviewer' : 'Appeal rejected by reviewer';
+                    try {
+                        await axios.post(`/v1/appeal/audit`, {
+                            appealID: appealId,
+                            status: status,
+                            opUser: this.username,
+                            opReason: reason,
+                        });
+                        this.pendingAppeals = this.pendingAppeals.filter(a => a.appealID !== appealId);
+                    } catch (error) {
+                        this.pendingAppealsError = `Failed to audit appeal #${appealId}. ` + (error.response?.data?.message || '');
+                    }
                 }
             }
         }).mount('#app')

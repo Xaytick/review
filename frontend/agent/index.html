@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 助手</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --user-msg-bg: #007bff;
+            --assistant-msg-bg: #f1f2f6;
+            --page-bg: #ffffff; /* 与 dashboard 保持一致 */
+            --border-color: #dee2e6;
+            --text-color: #212529;
+            --subtle-text-color: #6c757d;
+        }
+        body {
+            background-color: var(--page-bg);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        #chat-container {
+            max-width: 1200px;
+            margin: 16px auto;
+            background-color: var(--page-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 96px);
+        }
+        #chat-history {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .message .sender {
+            font-weight: 600;
+            font-size: 0.9em;
+            color: var(--subtle-text-color);
+            margin-bottom: 5px;
+        }
+        .message .text {
+            padding: 12px 18px;
+            border-radius: 20px;
+            max-width: 85%;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+        .user-message {
+            align-items: flex-end;
+        }
+        .user-message .text {
+            background-color: var(--user-msg-bg);
+            color: white;
+        }
+        .assistant-message {
+            align-items: flex-start;
+        }
+        .assistant-message .text {
+            background-color: var(--assistant-msg-bg);
+            color: var(--text-color);
+            border: 1px solid #e9ecef;
+        }
+        .message .text.thinking, .message .text.error {
+            color: var(--subtle-text-color);
+            font-style: italic;
+        }
+        #chat-input-container {
+            padding: 15px 20px;
+            border-top: 1px solid var(--border-color);
+        }
+        #chat-input {
+            display: flex;
+            align-items: center;
+            background-color: var(--assistant-msg-bg);
+            border-radius: 25px;
+            padding: 5px;
+        }
+        #user-input {
+            flex-grow: 1;
+            border: none;
+            background: transparent;
+            padding: 10px 15px;
+            font-size: 1rem;
+        }
+        #user-input:focus {
+            outline: none;
+            box-shadow: none;
+        }
+        #send-btn {
+            background-color: var(--user-msg-bg);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            transition: background-color 0.2s;
+        }
+        #send-btn:disabled {
+            background-color: #a9cffa;
+        }
+        #send-btn:not(:disabled):hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="container-fluid">
+    <!-- Global Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light mt-2 mb-3 rounded shadow-sm">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/dashboard/index.html">Kratos Reviews</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link" aria-current="page" href="/dashboard/index.html">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/agent/index.html">AI Agent</a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center">
+                    <span class="me-2">{{ username }}</span>
+                    <span class="badge text-bg-primary text-capitalize">{{ role || 'guest' }}</span>
+                    <button class="btn btn-sm btn-outline-secondary ms-3" @click="logout">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <div id="chat-container">
+        <div id="chat-history">
+            <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.sender === 'user' ? 'user-message' : 'assistant-message']">
+                <div class="sender">{{ msg.sender === 'user' ? 'You' : 'Cortex AI' }}</div>
+                <div class="text" :class="msg.type || ''" v-html="msg.text"></div>
+            </div>
+        </div>
+        <div id="chat-input-container">
+            <div id="chat-input">
+                <input type="text" id="user-input" class="form-control" v-model="userInput" @keyup.enter="sendMessage" placeholder="与 Cortex AI 对话..." :disabled="isThinking">
+                <button id="send-btn" class="btn" @click="sendMessage" :disabled="isThinking || !userInput.trim()">
+                    <i class="bi bi-arrow-up"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@3.2.47/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios@1.4.0/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jwt-decode@3.1.2/build/jwt-decode.min.js"></script>
+
+<script>
+    const { createApp } = Vue
+
+    createApp({
+        data() {
+            return {
+                userInput: '',
+                isThinking: false,
+                messages: [
+                    { sender: 'assistant', text: '你好！我是您的AI助手Cortex，有什么可以帮助您的吗？' }
+                ],
+                sessionId: localStorage.getItem('agent_session_id') || ('session_' + Date.now()),
+                username: '',
+                role: ''
+            }
+        },
+        created() {
+            const token = localStorage.getItem('jwt_token');
+            if (!token) {
+                alert('您尚未登录，请先登录后再使用AI助手。');
+                window.location.href = `/user/?redirect=${encodeURIComponent(window.location.pathname)}`;
+            }
+            // 固化 sessionId
+            localStorage.setItem('agent_session_id', this.sessionId);
+            try {
+                const decoded = jwt_decode(token);
+                this.username = decoded.username || 'User';
+                this.role = decoded.role || '';
+                axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            } catch (e) {
+                console.error('failed to decode token', e);
+            }
+        },
+        methods: {
+            logout() {
+                localStorage.removeItem('jwt_token');
+                window.location.href = '/user/index.html';
+            },
+            scrollToBottom() {
+                this.$nextTick(() => {
+                    const chatHistory = this.$el.querySelector("#chat-history");
+                    if (chatHistory) {
+                        chatHistory.scrollTop = chatHistory.scrollHeight;
+                    }
+                });
+            },
+            async sendMessage() {
+                if (!this.userInput.trim() || this.isThinking) return;
+
+                const userText = this.userInput;
+                this.messages.push({ sender: 'user', text: userText });
+                this.userInput = '';
+                this.isThinking = true;
+                this.scrollToBottom();
+
+                const token = localStorage.getItem('jwt_token');
+                if (!token) {
+                    this.messages.push({ sender: 'assistant', text: "登录会话已失效，请重新登录。", type: 'error' });
+                    this.isThinking = false;
+                    this.scrollToBottom();
+                    setTimeout(() => window.location.href = `/user/?redirect=${encodeURIComponent(window.location.pathname)}`, 2000);
+                    return;
+                }
+                
+                const axiosConfig = {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                };
+
+                try {
+                    const processResponse = await axios.post('/v1/agent/process', {
+                        query: userText,
+                        session_id: this.sessionId
+                    }, axiosConfig);
+                    const plan = processResponse.data;
+
+                    if (plan.finalAnswer) {
+                        this.messages.push({ sender: 'assistant', text: marked.parseInline(plan.finalAnswer || '') });
+                    } else if (plan.toolCall) {
+                        this.messages.push({ sender: 'assistant', text: `正在调用工具: <i>${plan.toolCall.toolName}</i>...`, type: 'thinking' });
+                        this.scrollToBottom();
+                        
+                        const toolResponse = await axios.post('/v1/agent/calltool', {
+                            tool_name: plan.toolCall.toolName,
+                            arguments: plan.toolCall.arguments,
+                            original_query: userText
+                        }, axiosConfig);
+                        
+                        this.messages.pop(); 
+                        this.messages.push({ sender: 'assistant', text: marked.parse(toolResponse.data.result || '') });
+
+                    } else {
+                        this.messages.push({ sender: 'assistant', text: '抱歉，我暂时无法回答这个问题。', type: 'error' });
+                    }
+
+                } catch (error) {
+                    console.error('Error in agent flow:', error);
+                    const errorMessage = error.response?.data?.message || '与服务器通信时发生错误。';
+                    if (this.messages.length > 0 && this.messages[this.messages.length - 1].type === 'thinking') {
+                         this.messages.pop();
+                    }
+                    if (error.response?.status === 401) {
+                         this.messages.push({ sender: 'assistant', text: `认证失败: ${errorMessage} 将跳转到登录页面。`, type: 'error' });
+                         setTimeout(() => window.location.href = `/user/?redirect=${encodeURIComponent(window.location.pathname)}`, 2000);
+                    } else {
+                         this.messages.push({ sender: 'assistant', text: `出错了: ${errorMessage}`, type: 'error' });
+                    }
+                } finally {
+                    this.isThinking = false;
+                    this.scrollToBottom();
+                }
+            },
+        }
+    }).mount('#app')
+</script>
+
+</body>
+</html>

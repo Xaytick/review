@@ -24,6 +24,8 @@ type ReviewRepo interface {
 	ReplyReview(context.Context, *ReplyReviewParam) (*model.ReviewInfo, error)
 	ListReviewByStoreID(context.Context, int64, int32, int32) ([]*MyReviewInfo, error)
 	ListReviewByUserID(context.Context, int64, int32, int32) ([]*MyReviewInfo, error)
+	ListReviewsByStatus(context.Context, int32, int32, int32) ([]*MyReviewInfo, error)
+	ListAppealsByStatus(context.Context, int32, int32, int32) ([]*model.ReviewAppealInfo, error)
 }
 
 type ReviewUsecase struct {
@@ -39,7 +41,6 @@ func NewReviewUsecase(repo ReviewRepo, logger log.Logger) *ReviewUsecase {
 }
 
 // 自定义评论信息, 用于解决 unmarshal error: parsing time "2025-07-03 22:58:19" as "2006-01-02T15:04:05Z07:00"
-// 使用string类型解决 error: json: cannot unmarshal string into Go struct field MyReviewInfo.ReviewInfo.anonymous of type int32
 type MyReviewInfo struct {
 	*model.ReviewInfo
 	CreateAt     MyTime `json:"create_at"`
@@ -189,4 +190,34 @@ func (uc *ReviewUsecase) ListReviewByUserID(ctx context.Context, userID int64, p
 	limit := size
 	uc.log.WithContext(ctx).Debugf("[biz] ListReviewByUserID, userID: %d, offset: %d, limit: %d", userID, offset, limit)
 	return uc.repo.ListReviewByUserID(ctx, userID, offset, limit)
+}
+
+// ListReviewsByStatus lists reviews by their status with pagination.
+func (uc *ReviewUsecase) ListReviewsByStatus(ctx context.Context, status int32, page int32, size int32) ([]*MyReviewInfo, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 || size > 50 {
+		size = 10
+	}
+	offset := (page - 1) * size
+	limit := size
+
+	uc.log.WithContext(ctx).Debugf("[biz] ListReviewsByStatus, status: %d, offset: %d, limit: %d", status, offset, limit)
+	return uc.repo.ListReviewsByStatus(ctx, status, offset, limit)
+}
+
+// ListAppealsByStatus lists appeals by their status with pagination.
+func (uc *ReviewUsecase) ListAppealsByStatus(ctx context.Context, status int32, page int32, size int32) ([]*model.ReviewAppealInfo, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 || size > 50 {
+		size = 10
+	}
+	offset := (page - 1) * size
+	limit := size
+
+	uc.log.WithContext(ctx).Debugf("[biz] ListAppealsByStatus, status: %d, offset: %d, limit: %d", status, offset, limit)
+	return uc.repo.ListAppealsByStatus(ctx, status, offset, limit)
 }
