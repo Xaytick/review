@@ -10,28 +10,83 @@ import (
 	"review/internal/data/model"
 	"review/internal/data/query"
 	"review/pkg/snowflake"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
 	"github.com/go-kratos/kratos/v2/log"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 )
 
+// CacheItem 本地缓存项
+type CacheItem struct {
+	Data      []byte
+	ExpiredAt time.Time
+}
+
+// CacheStats 缓存统计
+type CacheStats struct {
+	LocalHits  int64
+	RedisHits  int64
+	ESHits     int64
+	TotalReqs  int64
+	mutex      sync.RWMutex
+}
+
+func (cs *CacheStats) IncrLocalHit() {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	cs.LocalHits++
+	cs.TotalReqs++
+}
+
+func (cs *CacheStats) IncrRedisHit() {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	cs.RedisHits++
+	cs.TotalReqs++
+}
+
+func (cs *CacheStats) IncrESHit() {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	cs.ESHits++
+	cs.TotalReqs++
+}
+
+func (cs *CacheStats) GetStats() (local, redis, es, total int64) {
+	cs.mutex.RLock()
+	defer cs.mutex.RUnlock()
+	return cs.LocalHits, cs.RedisHits, cs.ESHits, cs.TotalReqs
+}
+
 type reviewRepo struct {
-	data *Data
-	log  *log.Helper
-	ai   *ai.AIClient
+	data       *Data
+	log        *log.Helper
+	ai         *ai.AIClient
+	localCache *lru.Cache
+	cacheMutex sync.RWMutex
+	stats      *CacheStats
 }
 
 // NewReviewRepo 新建评论仓库
 func NewReviewRepo(data *Data, logger log.Logger, ai *ai.AIClient) biz.ReviewRepo {
+	cache, err := lru.New(1000) // 本地缓存1000个条目
+	if err != nil {
+		panic(fmt.Sprintf("failed to create local cache: %v", err))
+	}
+	
 	return &reviewRepo{
-		data: data,
-		log:  log.NewHelper(logger),
-		ai:   ai,
+		data:       data,
+		log:        log.NewHelper(logger),
+		ai:         ai,
+		localCache: cache,
+		stats:      &CacheStats{},
 	}
 }
 
@@ -218,7 +273,7 @@ func (r *reviewRepo) AuditReview(ctx context.Context, param *biz.AuditReviewPara
 		"status":     status,
 		"op_reason":  reason,
 		"op_remarks": remarks,
-		"update_by":  "Gemini",
+		"update_by":  "AI",
 		"update_at":  time.Now(),
 	})
 	if err != nil {
@@ -410,6 +465,117 @@ func (r *reviewRepo) ListReviewsByStatus(ctx context.Context, status int32, offs
 	return r.listReviewsByStatusFromES(ctx, status, offset, limit)
 }
 
+// ListReviews supports filter and sort via ES
+func (r *reviewRepo) ListReviews(ctx context.Context, in *biz.ListReviewsParam) ([]*biz.MyReviewInfo, error) {
+	// Build ES bool query with term/match only; range & sort will be handled in memory for compatibility
+	must := make([]types.Query, 0, 4)
+	filter := make([]types.Query, 0, 4)
+
+	if in.UserID > 0 {
+		filter = append(filter, types.Query{Term: map[string]types.TermQuery{"user_id": {Value: in.UserID}}})
+	}
+	if in.StoreID > 0 {
+		filter = append(filter, types.Query{Term: map[string]types.TermQuery{"store_id": {Value: in.StoreID}}})
+	}
+	if in.Status > 0 {
+		filter = append(filter, types.Query{Term: map[string]types.TermQuery{"status": {Value: in.Status}}})
+	}
+	if strings.TrimSpace(in.Keyword) != "" {
+		must = append(must, types.Query{Match: map[string]types.MatchQuery{"content": {Query: in.Keyword}}})
+	}
+
+	boolQuery := &types.BoolQuery{}
+	if len(must) > 0 {
+		boolQuery.Must = must
+	}
+	if len(filter) > 0 {
+		boolQuery.Filter = filter
+	}
+
+	from := int((in.Page - 1) * in.Size)
+	size := int(in.Size)
+	if from < 0 {
+		from = 0
+	}
+	if size <= 0 {
+		size = 10
+	}
+
+	resp, err := r.data.es.Search().
+		Index("review").
+		Query(&types.Query{Bool: boolQuery}).
+		From(from).
+		Size(size).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
+	for _, hit := range resp.Hits.Hits {
+		tmp := &biz.MyReviewInfo{}
+		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+			// 有些索引可能用空字符串或空对象保存时间，这里作一次修复再反序列化
+			var m map[string]any
+			if e := json.Unmarshal(hit.Source_, &m); e == nil {
+				if v, ok := m["create_at"].(string); ok && strings.TrimSpace(v) == "" {
+					m["create_at"] = time.Now().UTC().Format(time.RFC3339)
+				}
+				if v, ok := m["update_at"].(string); ok && strings.TrimSpace(v) == "" {
+					m["update_at"] = time.Now().UTC().Format(time.RFC3339)
+				}
+				if b, e2 := json.Marshal(m); e2 == nil {
+					if e3 := json.Unmarshal(b, tmp); e3 != nil {
+						r.log.Errorf("es retry unmarshal error: %v", e3)
+						continue
+					}
+				} else {
+					r.log.Errorf("es fix marshal error: %v", e2)
+					continue
+				}
+			} else {
+				r.log.Errorf("es map unmarshal error: %v", e)
+				continue
+			}
+		}
+		// score range filter in memory
+		if (in.MinScore > 0 && tmp.Score < in.MinScore) || (in.MaxScore > 0 && tmp.Score > in.MaxScore) {
+			continue
+		}
+		list = append(list, tmp)
+	}
+
+	// in-memory sort
+	less := func(i, j int) bool { return list[i].ReviewID > list[j].ReviewID }
+	switch strings.ToLower(in.SortBy) {
+	case "score":
+		less = func(i, j int) bool { return list[i].Score > list[j].Score }
+	case "like_count":
+		// not present; keep default
+	default:
+		// try update_at 优先；若为空则降级 create_at；若都为空再按 id
+		less = func(i, j int) bool {
+			ti := time.Time(list[i].UpdateAt)
+			tj := time.Time(list[j].UpdateAt)
+			if !ti.IsZero() || !tj.IsZero() {
+				return ti.After(tj)
+			}
+			ci := time.Time(list[i].CreateAt)
+			cj := time.Time(list[j].CreateAt)
+			if !ci.IsZero() || !cj.IsZero() {
+				return ci.After(cj)
+			}
+			return list[i].ID > list[j].ID
+		}
+	}
+	if strings.ToLower(in.SortOrder) == "asc" {
+		orig := less
+		less = func(i, j int) bool { return !orig(i, j) }
+	}
+	sort.SliceStable(list, less)
+	return list, nil
+}
+
 // ListAppealsByStatus lists appeal records by status with pagination.
 func (r *reviewRepo) ListAppealsByStatus(ctx context.Context, status int32, offset int32, limit int32) ([]*model.ReviewAppealInfo, error) {
 	// Directly query DB for now. If needed, we can add ES indexing later for appeals.
@@ -455,18 +621,33 @@ func (r *reviewRepo) ListReviewByStoreID1(ctx context.Context, storeID int64, of
 
 // 升级版带缓存的查询函数, 根据用户ID获取评论列表（分页）
 func (r *reviewRepo) ListReviewByUserID1(ctx context.Context, userID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+	// 记录开始时间
+	start := time.Now()
+	
+	r.log.Infof("🔥 [三级缓存查询] 开始查询用户评论 - UserID: %d, Offset: %d, Limit: %d", userID, offset, limit)
+	
 	// 1. 从redis中获取数据
 	// 2. 如果redis中没有数据，则从ES中获取数据
 	// 3. 通过singleflight.Group合并并发请求
 	key := fmt.Sprintf("review:%d:%d:%d", userID, offset, limit)
+	
+	cacheStart := time.Now()
 	b, err := r.GetDataBySingleFlight(ctx, key, "user")
+	cacheElapsed := time.Since(cacheStart)
+	
 	if err != nil {
+		r.log.Errorf("❌ [三级缓存查询] 缓存查询失败 - UserID: %d, 耗时: %v, 错误: %v", userID, time.Since(start), err)
 		return nil, err
 	}
+	
+	// 数据反序列化
+	parseStart := time.Now()
 	hm := new(types.HitsMetadata)
 	if err := json.Unmarshal(b, hm); err != nil {
+		r.log.Errorf("❌ [三级缓存查询] 数据反序列化失败 - UserID: %d, 错误: %v", userID, err)
 		return nil, err
 	}
+	
 	// 4. 反序列化
 	list := make([]*biz.MyReviewInfo, 0, hm.Total.Value)
 	for _, hit := range hm.Hits {
@@ -477,28 +658,77 @@ func (r *reviewRepo) ListReviewByUserID1(ctx context.Context, userID int64, offs
 		}
 		list = append(list, tmp)
 	}
+	
+	parseElapsed := time.Since(parseStart)
+	totalElapsed := time.Since(start)
+	
+	// 获取缓存统计信息
+	local, redis, es, total := r.GetCacheStats()
+	
+	r.log.Infof("✅ [三级缓存查询] 查询完成 - UserID: %d, 总耗时: %v (缓存: %v, 解析: %v), 返回记录数: %d", 
+		userID, totalElapsed, cacheElapsed, parseElapsed, len(list))
+	
+	r.log.Infof("📊 [三级缓存查询] 缓存统计 - 本地:%d, Redis:%d, ES:%d, 总计:%d", local, redis, es, total)
+	
+	// 性能分析日志
+	if totalElapsed > 10*time.Millisecond {
+		r.log.Warnf("⚠️  [三级缓存查询] 查询耗时较长 - UserID: %d, 耗时: %v (可能缓存未命中)", userID, totalElapsed)
+	} else if totalElapsed > 5*time.Millisecond {
+		r.log.Infof("⏰ [三级缓存查询] 查询耗时中等 - UserID: %d, 耗时: %v (可能Redis缓存命中)", userID, totalElapsed)
+	} else {
+		r.log.Infof("🚀 [三级缓存查询] 查询响应极快 - UserID: %d, 耗时: %v (本地缓存命中)", userID, totalElapsed)
+	}
+	
 	return list, nil
 }
 
-// 通过singleflight获取数据
+// 通过singleflight获取数据 - 三级缓存架构
 func (r *reviewRepo) GetDataBySingleFlight(ctx context.Context, key string, target string) ([]byte, error) {
+	start := time.Now()
+	
 	v, err, _ := g.Do(key, func() (interface{}, error) {
-		// 1. 从redis中获取数据
-		data, err := r.GetDataFromCache(ctx, key)
-		if err == nil {
-			r.log.Debugf("GetDataBySingleFlight(from redis cache), key: %s, data: %s", key, string(data))
+		// 1. 先查本地缓存
+		localStart := time.Now()
+		if data := r.getFromLocalCache(key); data != nil {
+			r.stats.IncrLocalHit()
+			localElapsed := time.Since(localStart)
+			r.log.Infof("🎯 [本地缓存命中] key: %s, 耗时: %v, 总耗时: %v", key, localElapsed, time.Since(start))
 			return data, nil
 		}
-		// 2. 如果redis中没有数据，则从ES中获取数据
+		localElapsed := time.Since(localStart)
+		r.log.Debugf("❌ [本地缓存未命中] key: %s, 查询耗时: %v", key, localElapsed)
+		
+		// 2. 查Redis缓存
+		redisStart := time.Now()
+		data, err := r.GetDataFromCache(ctx, key)
+		redisElapsed := time.Since(redisStart)
+		
+		if err == nil {
+			r.stats.IncrRedisHit()
+			r.log.Infof("🎯 [Redis缓存命中] key: %s, 耗时: %v, 总耗时: %v", key, redisElapsed, time.Since(start))
+			// 写入本地缓存
+			r.setToLocalCache(key, data)
+			return data, nil
+		}
+		r.log.Debugf("❌ [Redis缓存未命中] key: %s, 查询耗时: %v, 错误: %v", key, redisElapsed, err)
+		
+		// 3. 如果redis中没有数据，则从ES中获取数据
 		if errors.Is(err, redis.Nil) {
+			esStart := time.Now()
 			data, err = r.GetDataFromES(ctx, key, target)
+			esElapsed := time.Since(esStart)
+			
 			if err == nil {
-				r.log.Debugf("GetDataBySingleFlight(from es), key: %s, data: %s", key, string(data))
+				r.stats.IncrESHit()
+				r.log.Infof("🎯 [ES查询成功] key: %s, 耗时: %v, 总耗时: %v", key, esElapsed, time.Since(start))
+				// 写入本地缓存和Redis
+				r.setToLocalCache(key, data)
 				return data, r.SetCache(ctx, key, data)
 			}
+			r.log.Errorf("❌ [ES查询失败] key: %s, 耗时: %v, 错误: %v", key, esElapsed, err)
 			return nil, err
 		}
-		// 3. 如果查询redis报错，则返回错误
+		// 4. 如果查询redis报错，则返回错误
 		return nil, err
 	})
 	if err != nil {
@@ -576,6 +806,49 @@ func (r *reviewRepo) SetCache(ctx context.Context, key string, value []byte) err
 	return r.data.rdb.Set(ctx, key, value, time.Second*60).Err()
 }
 
+// 本地缓存读取
+func (r *reviewRepo) getFromLocalCache(key string) []byte {
+	r.cacheMutex.RLock()
+	defer r.cacheMutex.RUnlock()
+	
+	if val, ok := r.localCache.Get(key); ok {
+		item := val.(*CacheItem)
+		if time.Now().Before(item.ExpiredAt) {
+			return item.Data
+		}
+		// 过期删除
+		r.localCache.Remove(key)
+	}
+	return nil
+}
+
+// 本地缓存写入
+func (r *reviewRepo) setToLocalCache(key string, data []byte) {
+	r.cacheMutex.Lock()
+	defer r.cacheMutex.Unlock()
+	
+	item := &CacheItem{
+		Data:      data,
+		ExpiredAt: time.Now().Add(30 * time.Second), // 本地缓存30秒
+	}
+	r.localCache.Add(key, item)
+}
+
+// GetCacheStats 获取缓存统计信息
+func (r *reviewRepo) GetCacheStats() (localHits, redisHits, esHits, totalReqs int64) {
+	return r.stats.GetStats()
+}
+
+// ResetCacheStats 重置缓存统计
+func (r *reviewRepo) ResetCacheStats() {
+	r.stats.mutex.Lock()
+	defer r.stats.mutex.Unlock()
+	r.stats.LocalHits = 0
+	r.stats.RedisHits = 0
+	r.stats.ESHits = 0
+	r.stats.TotalReqs = 0
+}
+
 // listReviewsByStatusFromES directly queries Elasticsearch for reviews by their status.
 func (r *reviewRepo) listReviewsByStatusFromES(ctx context.Context, status int32, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
 
@@ -601,80 +874,110 @@ func (r *reviewRepo) listReviewsByStatusFromES(ctx context.Context, status int32
 	return list, nil
 }
 
-// // 旧版不带缓存的查询函数
-// func (r *reviewRepo) ListReviewByStoreID2(ctx context.Context, storeID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
-// 	// 去ES查询
-// 	resp, err := r.data.es.Search().Index("review").
-// 		Query(&types.Query{
-// 			Bool: &types.BoolQuery{
-// 				Filter: []types.Query{
-// 					{
-// 						Term: map[string]types.TermQuery{
-// 							"store_id": {Value: storeID},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		}).
-// 		From(int(offset)).
-// 		Size(int(limit)).
-// 		Do(ctx)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+// 旧版不带缓存的查询函数
+func (r *reviewRepo) ListReviewByStoreID2(ctx context.Context, storeID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+	// 去ES查询
+	resp, err := r.data.es.Search().Index("review").
+		Query(&types.Query{
+			Bool: &types.BoolQuery{
+				Filter: []types.Query{
+					{
+						Term: map[string]types.TermQuery{
+							"store_id": {Value: storeID},
+						},
+					},
+				},
+			},
+		}).
+		From(int(offset)).
+		Size(int(limit)).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-// 	b, _ := json.Marshal(resp)
-// 	fmt.Println("es search result total:", resp.Hits.Total.Value)
-// 	fmt.Println("es search result hits:", string(b))
+	b, _ := json.Marshal(resp)
+	fmt.Println("es search result total:", resp.Hits.Total.Value)
+	fmt.Println("es search result hits:", string(b))
 
-// 	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
-// 	// 反序列化
-// 	for _, hit := range resp.Hits.Hits {
-// 		tmp := &biz.MyReviewInfo{}
-// 		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
-// 			r.log.Errorf("es search result unmarshal error: %v", err)
-// 			continue
-// 		}
-// 		list = append(list, tmp)
-// 	}
-// 	return list, nil
-// }
+	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
+	// 反序列化
+	for _, hit := range resp.Hits.Hits {
+		tmp := &biz.MyReviewInfo{}
+		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+			r.log.Errorf("es search result unmarshal error: %v", err)
+			continue
+		}
+		list = append(list, tmp)
+	}
+	return list, nil
+}
 
-// // 旧版不带缓存的查询函数
-// func (r *reviewRepo) ListReviewByUserID2(ctx context.Context, userID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
-// 	// 去ES查询
-// 	resp, err := r.data.es.Search().Index("review").
-// 		Query(&types.Query{
-// 			Bool: &types.BoolQuery{
-// 				Filter: []types.Query{
-// 					{
-// 						Term: map[string]types.TermQuery{
-// 							"user_id": {Value: userID},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		}).
-// 		From(int(offset)).
-// 		Size(int(limit)).
-// 		Do(ctx)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+// 旧版不带缓存的查询函数
+func (r *reviewRepo) ListReviewByUserID2(ctx context.Context, userID int64, offset int32, limit int32) ([]*biz.MyReviewInfo, error) {
+	// 记录开始时间
+	start := time.Now()
+	
+	r.log.Infof("🚀 [无缓存查询] 开始查询用户评论 - UserID: %d, Offset: %d, Limit: %d", userID, offset, limit)
+	
+	// 去ES查询
+	esStart := time.Now()
+	resp, err := r.data.es.Search().Index("review").
+		Query(&types.Query{
+			Bool: &types.BoolQuery{
+				Filter: []types.Query{
+					{
+						Term: map[string]types.TermQuery{
+							"user_id": {Value: userID},
+						},
+					},
+				},
+			},
+		}).
+		From(int(offset)).
+		Size(int(limit)).
+		Do(ctx)
+	esElapsed := time.Since(esStart)
+	
+	if err != nil {
+		r.log.Errorf("❌ [无缓存查询] ES查询失败 - UserID: %d, 耗时: %v, 错误: %v", userID, time.Since(start), err)
+		return nil, err
+	}
+	
+	r.log.Infof("📊 [无缓存查询] ES查询完成 - UserID: %d, ES耗时: %v, 命中数: %d", userID, esElapsed, resp.Hits.Total.Value)
 
-// 	b, _ := json.Marshal(resp)
-// 	fmt.Println("es search result total:", resp.Hits.Total.Value)
-// 	fmt.Println("es search result hits:", string(b))
+	// 数据序列化和反序列化
+	parseStart := time.Now()
+	
+	b, _ := json.Marshal(resp)
+	fmt.Println("es search result total:", resp.Hits.Total.Value)
+	fmt.Println("es search result hits:", string(b))
 
-// 	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
-// 	// 反序列化
-// 	for _, hit := range resp.Hits.Hits {
-// 		tmp := &biz.MyReviewInfo{}
-// 		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
-// 			r.log.Errorf("es search result unmarshal error: %v", err)
-// 			continue
-// 		}
-// 		list = append(list, tmp)
-// 	}
-// 	return list, nil
-// }
+	list := make([]*biz.MyReviewInfo, 0, resp.Hits.Total.Value)
+	// 反序列化
+	for _, hit := range resp.Hits.Hits {
+		tmp := &biz.MyReviewInfo{}
+		if err := json.Unmarshal(hit.Source_, tmp); err != nil {
+			r.log.Errorf("es search result unmarshal error: %v", err)
+			continue
+		}
+		list = append(list, tmp)
+	}
+	
+	parseElapsed := time.Since(parseStart)
+	totalElapsed := time.Since(start)
+	
+	r.log.Infof("✅ [无缓存查询] 查询完成 - UserID: %d, 总耗时: %v (ES: %v, 解析: %v), 返回记录数: %d", 
+		userID, totalElapsed, esElapsed, parseElapsed, len(list))
+	
+	// 性能分析日志
+	if totalElapsed > 100*time.Millisecond {
+		r.log.Warnf("⚠️  [无缓存查询] 查询耗时较长 - UserID: %d, 耗时: %v", userID, totalElapsed)
+	} else if totalElapsed > 50*time.Millisecond {
+		r.log.Infof("⏰ [无缓存查询] 查询耗时中等 - UserID: %d, 耗时: %v", userID, totalElapsed)
+	} else {
+		r.log.Infof("🚀 [无缓存查询] 查询响应快速 - UserID: %d, 耗时: %v", userID, totalElapsed)
+	}
+	
+	return list, nil
+}

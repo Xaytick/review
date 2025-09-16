@@ -91,7 +91,7 @@ func main() {
 
 	// Manually set the API key from the environment variable.
 	// This bypasses any issues with config placeholder expansion.
-	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv("QWEN_API_KEY"); apiKey != "" {
 		if bc.Ai == nil {
 			bc.Ai = &conf.AI{}
 		}

@@ -20,5 +20,6 @@ elasticsearch:
   addresses:
     - http://127.0.0.1:9200
 ai:
-  api_key: ${GEMINI_API_KEY}
-  model: gemini-2.0-flash
+  api_key: ${QWEN_API_KEY}
+  model: qwen-turbo
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1

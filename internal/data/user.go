@@ -7,6 +7,7 @@ import (
 	"review/internal/data/model"
 	"review/internal/data/query"
 	"review/pkg/snowflake"
+	"strconv"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -77,7 +78,8 @@ func (r *userRepo) Login(ctx context.Context, username, password string) (string
 	}
 
 	claims := jwt.MapClaims{
-		"user_id":  dbUser.ID,
+		// Use string to avoid precision loss on clients / JSON
+		"user_id":  strconv.FormatInt(dbUser.ID, 10),
 		"username": dbUser.Username,
 		"role":     dbUser.Role,
 		"exp":      time.Now().Add(time.Hour * 24).Unix(),
@@ -90,7 +92,7 @@ func (r *userRepo) Login(ctx context.Context, username, password string) (string
 			// If store not found, it's an inconsistent data state, but we can choose to proceed without store_id
 			r.log.WithContext(ctx).Warnf("could not find store for merchant user_id: %d, error: %v", dbUser.ID, err)
 		} else {
-			claims["store_id"] = store.StoreID
+			claims["store_id"] = strconv.FormatInt(store.StoreID, 10)
 		}
 	}
 

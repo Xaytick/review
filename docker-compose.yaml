@@ -27,6 +27,7 @@ services:
       -ui
       -client=0.0.0.0
       -bind=0.0.0.0
+      
 
   review-canal:
     image: canal/canal-server:latest

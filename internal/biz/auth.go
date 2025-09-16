@@ -2,6 +2,8 @@ package biz
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/middleware/auth/jwt"
@@ -31,8 +33,27 @@ func userFromContext(ctx context.Context) (*authedUser, error) {
 		return nil, ErrUserNotFound
 	}
 
-	userIDFloat, ok := mapClaims["user_id"].(float64)
-	if !ok {
+	// Robustly parse user_id: prefer string to avoid precision loss
+	var userID int64
+	if v, ok := mapClaims["user_id"]; ok {
+		switch t := v.(type) {
+		case string:
+			id, err := strconv.ParseInt(t, 10, 64)
+			if err == nil {
+				userID = id
+			}
+		case float64:
+			userID = int64(t)
+		default:
+			// best-effort stringify
+			if s, ok := v.(fmt.Stringer); ok {
+				if id, err := strconv.ParseInt(s.String(), 10, 64); err == nil {
+					userID = id
+				}
+			}
+		}
+	}
+	if userID == 0 {
 		return nil, ErrUserNotFound
 	}
 
@@ -42,13 +63,20 @@ func userFromContext(ctx context.Context) (*authedUser, error) {
 	}
 
 	user := &authedUser{
-		UserID: int64(userIDFloat),
+		UserID: userID,
 		Role:   role,
 	}
 
-	// StoreID is optional, only for merchants
-	if storeIDFloat, ok := mapClaims["store_id"].(float64); ok {
-		user.StoreID = int64(storeIDFloat)
+	// StoreID is optional, only for merchants. Prefer string.
+	if v, ok := mapClaims["store_id"]; ok {
+		switch t := v.(type) {
+		case string:
+			if id, err := strconv.ParseInt(t, 10, 64); err == nil {
+				user.StoreID = id
+			}
+		case float64:
+			user.StoreID = int64(t)
+		}
 	}
 
 	return user, nil

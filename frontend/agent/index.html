@@ -142,7 +142,7 @@
         </div>
     </nav>
     <div id="chat-container">
-        <div id="chat-history">
+        <div id="chat-history" ref="chatHistory">
             <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.sender === 'user' ? 'user-message' : 'assistant-message']">
                 <div class="sender">{{ msg.sender === 'user' ? 'You' : 'Cortex AI' }}</div>
                 <div class="text" :class="msg.type || ''" v-html="msg.text"></div>
@@ -197,18 +197,35 @@
                 console.error('failed to decode token', e);
             }
         },
+        mounted() {
+            // 初次渲染后也滚到底
+            this.scrollToBottom(true);
+        },
+        watch: {
+            // 监听消息变化，自动滚动到底部（包括模型生成回复、工具结果等）
+            messages: {
+                deep: true,
+                handler() {
+                    this.scrollToBottom();
+                }
+            }
+        },
         methods: {
             logout() {
                 localStorage.removeItem('jwt_token');
                 window.location.href = '/user/index.html';
             },
-            scrollToBottom() {
-                this.$nextTick(() => {
-                    const chatHistory = this.$el.querySelector("#chat-history");
+            scrollToBottom(immediate = false) {
+                const run = () => {
+                    const chatHistory = this.$refs.chatHistory;
                     if (chatHistory) {
-                        chatHistory.scrollTop = chatHistory.scrollHeight;
+                        chatHistory.scrollTo({ top: chatHistory.scrollHeight, behavior: immediate ? 'auto' : 'smooth' });
                     }
-                });
+                };
+                // 多次调度，确保在 DOM 更新与图片渲染后也能滚动
+                this.$nextTick(run);
+                setTimeout(run, 80);
+                setTimeout(run, 160);
             },
             async sendMessage() {
                 if (!this.userInput.trim() || this.isThinking) return;

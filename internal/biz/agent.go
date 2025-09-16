@@ -127,11 +127,52 @@ func (uc *AgentUsecase) CallTool(ctx context.Context, toolName, arguments, origi
 		rawResult, err = uc.reviewUC.ListReviewByStoreID(ctx, storeID, 1, 10)
 
 	case "ListMyReviews":
-		// RBAC: This tool is implicitly for the logged-in user, role check in getToolsForRole
-		if user.Role != "customer" {
-			return "", errors.Forbidden("FORBIDDEN", "只有顾客才能查询自己的评论")
-		}
+		// Any logged-in role can view own reviews
 		rawResult, err = uc.reviewUC.ListReviewByUserID(ctx, user.UserID, 1, 10)
+
+	case "SearchReviews":
+		var args struct {
+			UserID   int64  `json:"userID"`
+			StoreID  int64  `json:"storeID"`
+			Status   int32  `json:"status"`
+			MinScore int32  `json:"minScore"`
+			MaxScore int32  `json:"maxScore"`
+			Keyword  string `json:"keyword"`
+			SortBy   string `json:"sortBy"`
+			SortOrd  string `json:"sortOrder"`
+			Page     int32  `json:"page"`
+			Size     int32  `json:"size"`
+		}
+		if err = json.Unmarshal([]byte(arguments), &args); err != nil {
+			return "", errors.BadRequest("INVALID_ARGUMENTS", "无法解析SearchReviews的参数")
+		}
+		// Default to current user when userID omitted
+		if args.UserID == 0 {
+			args.UserID = user.UserID
+		}
+		param := &ListReviewsParam{
+			UserID:    args.UserID,
+			StoreID:   args.StoreID,
+			Status:    args.Status,
+			MinScore:  args.MinScore,
+			MaxScore:  args.MaxScore,
+			Keyword:   args.Keyword,
+			SortBy:    args.SortBy,
+			SortOrder: args.SortOrd,
+			Page:      args.Page,
+			Size:      args.Size,
+		}
+		var res []*MyReviewInfo
+		res, err = uc.reviewUC.ListReviews(ctx, param)
+		if err == nil && len(res) == 0 {
+			// Fallback: if querying own reviews and empty, try direct user list API
+			targetUserID := args.UserID
+			if targetUserID == 0 {
+				targetUserID = user.UserID
+			}
+			res, _ = uc.reviewUC.ListReviewByUserID(ctx, targetUserID, 1, 10)
+		}
+		rawResult = res
 
 	default:
 		return "", errors.NotFound("TOOL_NOT_FOUND", fmt.Sprintf("未找到名为 '%s' 的工具", toolName))
@@ -290,6 +331,25 @@ func getToolsForRole(role string) string {
 			"description": "根据店铺ID查询该店铺的评论列表。商家只能查询自己店铺的评论。",
 			"parameters": { "type": "object", "properties": { "storeID": { "type": "string", "description": "店铺的唯一ID" } }, "required": ["storeID"] }
 		}`,
+		`{
+            "name": "SearchReviews",
+            "description": "通用评论检索，支持评分范围、关键字与排序（create_at/score/like_count asc/desc）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "userID": {"type": "integer"},
+                    "storeID": {"type": "integer"},
+                    "status": {"type": "integer"},
+                    "minScore": {"type": "integer"},
+                    "maxScore": {"type": "integer"},
+                    "keyword": {"type": "string"},
+                    "sortBy": {"type": "string"},
+                    "sortOrder": {"type": "string"},
+                    "page": {"type": "integer"},
+                    "size": {"type": "integer"}
+                }
+            }
+        }`,
 	}
 
 	// Customer-specific tools

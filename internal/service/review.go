@@ -273,6 +273,56 @@ func (s *ReviewService) ListReviewsByStatus(ctx context.Context, req *pb.ListRev
 	return &pb.ListReviewByUserIDReply{List: list}, nil
 }
 
+// ListReviews provides a general list with filters and sorting
+func (s *ReviewService) ListReviews(ctx context.Context, req *pb.ListReviewsRequest) (*pb.ListReviewByUserIDReply, error) {
+	in := &biz.ListReviewsParam{
+		UserID:   req.UserID,
+		StoreID:  req.StoreID,
+		Status:   req.Status,
+		MinScore: req.MinScore,
+		MaxScore: req.MaxScore,
+		Keyword:  req.Keyword,
+		Page:     req.Page,
+		Size:     req.Size,
+	}
+	switch req.SortBy {
+	case pb.ReviewSortBy_SORT_BY_SCORE:
+		in.SortBy = "score"
+	case pb.ReviewSortBy_SORT_BY_LIKE_COUNT:
+		in.SortBy = "like_count"
+	default:
+		in.SortBy = "create_at"
+	}
+	if req.SortOrder == pb.SortOrder_ASC {
+		in.SortOrder = "asc"
+	} else {
+		in.SortOrder = "desc"
+	}
+
+	reviews, err := s.uc.ListReviews(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]*pb.ReviewInfo, 0, len(reviews))
+	for _, review := range reviews {
+		list = append(list, &pb.ReviewInfo{
+			ReviewID:     review.ReviewID,
+			UserID:       review.UserID,
+			OrderID:      review.OrderID,
+			StoreID:      review.StoreID,
+			Score:        review.Score,
+			ServiceScore: review.ServiceScore,
+			ExpressScore: review.ExpressScore,
+			Content:      review.Content,
+			PicInfo:      review.PicInfo,
+			VideoInfo:    review.VideoInfo,
+			Status:       review.Status,
+		})
+	}
+	return &pb.ListReviewByUserIDReply{List: list}, nil
+}
+
 // ListAppealsByStatus retrieves a list of appeals by status with pagination.
 func (s *ReviewService) ListAppealsByStatus(ctx context.Context, req *pb.ListAppealsByStatusRequest) (*pb.ListAppealsByStatusReply, error) {
 	fmt.Println("[service] ListAppealsByStatus, req:", req)
@@ -294,4 +344,37 @@ func (s *ReviewService) ListAppealsByStatus(ctx context.Context, req *pb.ListApp
 		})
 	}
 	return &pb.ListAppealsByStatusReply{List: list}, nil
+}
+
+// GetCacheStats 获取缓存统计信息
+func (s *ReviewService) GetCacheStats(ctx context.Context, req *pb.GetCacheStatsRequest) (*pb.GetCacheStatsReply, error) {
+	localHits, redisHits, esHits, totalReqs := s.uc.GetCacheStats()
+	
+	var localHitRate, redisHitRate, totalHitRate float64
+	if totalReqs > 0 {
+		localHitRate = float64(localHits) / float64(totalReqs) * 100
+		redisHitRate = float64(redisHits) / float64(totalReqs) * 100
+		totalHitRate = float64(localHits+redisHits) / float64(totalReqs) * 100
+	}
+	
+	return &pb.GetCacheStatsReply{
+		Stats: &pb.CacheStats{
+			LocalHits:    localHits,
+			RedisHits:    redisHits,
+			EsHits:       esHits,
+			TotalReqs:    totalReqs,
+			LocalHitRate: localHitRate,
+			RedisHitRate: redisHitRate,
+			TotalHitRate: totalHitRate,
+		},
+	}, nil
+}
+
+// ResetCacheStats 重置缓存统计
+func (s *ReviewService) ResetCacheStats(ctx context.Context, req *pb.ResetCacheStatsRequest) (*pb.ResetCacheStatsReply, error) {
+	s.uc.ResetCacheStats()
+	return &pb.ResetCacheStatsReply{
+		Success: true,
+		Message: "缓存统计已重置",
+	}, nil
 }

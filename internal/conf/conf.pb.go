@@ -346,6 +346,7 @@ type AI struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ApiKey        string                 `protobuf:"bytes,1,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
 	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	BaseUrl       string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -390,6 +391,13 @@ func (x *AI) GetApiKey() string {
 func (x *AI) GetModel() string {
 	if x != nil {
 		return x.Model
+	}
+	return ""
+}
+
+func (x *AI) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
 	}
 	return ""
 }
@@ -731,10 +739,11 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x16\n" +
 	"\x06scheme\x18\x02 \x01(\tR\x06scheme\"-\n" +
 	"\rElasticsearch\x12\x1c\n" +
-	"\taddresses\x18\x01 \x03(\tR\taddresses\"3\n" +
+	"\taddresses\x18\x01 \x03(\tR\taddresses\"N\n" +
 	"\x02AI\x12\x17\n" +
 	"\aapi_key\x18\x01 \x01(\tR\x06apiKey\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05modelB\x1bZ\x19review/internal/conf;confb\x06proto3"
+	"\x05model\x18\x02 \x01(\tR\x05model\x12\x19\n" +
+	"\bbase_url\x18\x03 \x01(\tR\abaseUrlB\x1bZ\x19review/internal/conf;confb\x06proto3"
 
 var (
 	file_conf_conf_proto_rawDescOnce sync.Once

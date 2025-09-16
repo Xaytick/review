@@ -169,6 +169,32 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.review.v1.ListAppealsByStatusReply'
+    /v1/cache/reset:
+        post:
+            tags:
+                - Review
+            description: 重置缓存统计
+            operationId: Review_ResetCacheStats
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.review.v1.ResetCacheStatsReply'
+    /v1/cache/stats:
+        get:
+            tags:
+                - Review
+            description: 获取缓存统计信息
+            operationId: Review_GetCacheStats
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.review.v1.GetCacheStatsReply'
     /v1/review:
         post:
             tags:
@@ -322,6 +348,67 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.review.v1.GetReviewReply'
+    /v1/reviews:
+        get:
+            tags:
+                - Review
+            description: 通用评论查询，支持筛选与排序
+            operationId: Review_ListReviews
+            parameters:
+                - name: userID
+                  in: query
+                  schema:
+                    type: string
+                - name: storeID
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: minScore
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: maxScore
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: keyword
+                  in: query
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: sortBy
+                  in: query
+                  schema:
+                    type: integer
+                    format: enum
+                - name: sortOrder
+                  in: query
+                  schema:
+                    type: integer
+                    format: enum
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.review.v1.ListReviewByUserIDReply'
     /v1/reviews/status/{status}:
         get:
             tags:
@@ -713,6 +800,27 @@ components:
                 opRemarks:
                     type: string
             description: 审核评论请求
+        api.review.v1.CacheStats:
+            type: object
+            properties:
+                localHits:
+                    type: string
+                redisHits:
+                    type: string
+                esHits:
+                    type: string
+                totalReqs:
+                    type: string
+                localHitRate:
+                    type: number
+                    format: double
+                redisHitRate:
+                    type: number
+                    format: double
+                totalHitRate:
+                    type: number
+                    format: double
+            description: 缓存统计信息
         api.review.v1.CreateReviewReply:
             type: object
             properties:
@@ -746,6 +854,12 @@ components:
                 anonymous:
                     type: boolean
             description: 创建评论请求
+        api.review.v1.GetCacheStatsReply:
+            type: object
+            properties:
+                stats:
+                    $ref: '#/components/schemas/api.review.v1.CacheStats'
+            description: 获取缓存统计回复
         api.review.v1.GetReviewReply:
             type: object
             properties:
@@ -795,6 +909,14 @@ components:
                     type: string
                 videoInfo:
                     type: string
+        api.review.v1.ResetCacheStatsReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+            description: 重置缓存统计回复
         api.review.v1.ReviewInfo:
             type: object
             properties:

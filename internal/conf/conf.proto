@@ -63,4 +63,5 @@ message Elasticsearch {
 message AI {
   string api_key = 1;
   string model = 2;
+  string base_url = 3;
 }

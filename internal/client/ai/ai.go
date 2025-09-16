@@ -6,18 +6,20 @@ import (
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/googleai"
+	"github.com/tmc/langchaingo/llms/openai"
 )
 
 type AIClient struct {
-	llm *googleai.GoogleAI
+	llm *openai.LLM
 }
 
 func NewAIClient(c *conf.AI) (*AIClient, error) {
-	llm, err := googleai.New(
-		context.Background(),
-		googleai.WithAPIKey(c.ApiKey),
-		googleai.WithDefaultModel(c.Model),
+	// 使用OpenAI兼容的客户端连接Qwen
+	// 注意：Qwen使用Authorization: Bearer <api_key>的方式
+	llm, err := openai.New(
+		openai.WithToken(c.ApiKey),
+		openai.WithModel(c.Model),
+		openai.WithBaseURL(c.BaseUrl), // 使用Qwen的API端点
 	)
 	if err != nil {
 		return nil, err
@@ -26,7 +28,7 @@ func NewAIClient(c *conf.AI) (*AIClient, error) {
 }
 
 // GetLLM 获取LLM实例
-func (c *AIClient) GetLLM() *googleai.GoogleAI {
+func (c *AIClient) GetLLM() *openai.LLM {
 	return c.llm
 }
 
@@ -64,7 +66,8 @@ func (c *AIClient) ModerateText(ctx context.Context, text string) (bool, string,
 
 	completion, err := llms.GenerateFromSinglePrompt(ctx, c.llm, prompt)
 	if err != nil {
-		return false, "AI content moderation service error", err
+		// 如果AI服务出错，默认通过审核，记录错误
+		return true, "AI service error, content approved by default: " + err.Error(), nil
 	}
 
 	// 这里需要添加解析AI返回结果的逻辑
@@ -86,5 +89,6 @@ func (c *AIClient) ModerateText(ctx context.Context, text string) (bool, string,
 		}
 		return false, reason, nil
 	}
-	return false, "AI content moderation service error", nil
+	// 如果AI返回的格式不符合预期，默认通过
+	return true, "AI response format unexpected, content approved by default", nil
 }

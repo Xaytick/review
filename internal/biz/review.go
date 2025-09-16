@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -26,6 +27,10 @@ type ReviewRepo interface {
 	ListReviewByUserID(context.Context, int64, int32, int32) ([]*MyReviewInfo, error)
 	ListReviewsByStatus(context.Context, int32, int32, int32) ([]*MyReviewInfo, error)
 	ListAppealsByStatus(context.Context, int32, int32, int32) ([]*model.ReviewAppealInfo, error)
+	ListReviews(context.Context, *ListReviewsParam) ([]*MyReviewInfo, error)
+	// 缓存统计接口
+	GetCacheStats() (localHits, redisHits, esHits, totalReqs int64)
+	ResetCacheStats()
 }
 
 type ReviewUsecase struct {
@@ -76,6 +81,12 @@ func (t *MyTime) UnmarshalJSON(data []byte) error {
 	}
 	*t = MyTime(parsedTime)
 	return nil
+}
+
+// MarshalJSON 自定义时间序列化，确保对外JSON为RFC3339字符串
+func (t MyTime) MarshalJSON() ([]byte, error) {
+	tt := time.Time(t)
+	return json.Marshal(tt.Format(time.RFC3339))
 }
 
 // 创建评论, service层调用
@@ -207,6 +218,17 @@ func (uc *ReviewUsecase) ListReviewsByStatus(ctx context.Context, status int32, 
 	return uc.repo.ListReviewsByStatus(ctx, status, offset, limit)
 }
 
+// ListReviews 通用筛选+排序
+func (uc *ReviewUsecase) ListReviews(ctx context.Context, in *ListReviewsParam) ([]*MyReviewInfo, error) {
+	if in.Page <= 0 {
+		in.Page = 1
+	}
+	if in.Size <= 0 || in.Size > 50 {
+		in.Size = 10
+	}
+	return uc.repo.ListReviews(ctx, in)
+}
+
 // ListAppealsByStatus lists appeals by their status with pagination.
 func (uc *ReviewUsecase) ListAppealsByStatus(ctx context.Context, status int32, page int32, size int32) ([]*model.ReviewAppealInfo, error) {
 	if page <= 0 {
@@ -220,4 +242,14 @@ func (uc *ReviewUsecase) ListAppealsByStatus(ctx context.Context, status int32, 
 
 	uc.log.WithContext(ctx).Debugf("[biz] ListAppealsByStatus, status: %d, offset: %d, limit: %d", status, offset, limit)
 	return uc.repo.ListAppealsByStatus(ctx, status, offset, limit)
+}
+
+// GetCacheStats 获取缓存统计信息
+func (uc *ReviewUsecase) GetCacheStats() (localHits, redisHits, esHits, totalReqs int64) {
+	return uc.repo.GetCacheStats()
+}
+
+// ResetCacheStats 重置缓存统计
+func (uc *ReviewUsecase) ResetCacheStats() {
+	uc.repo.ResetCacheStats()
 }
