@@ -27,7 +27,15 @@ import (
 type CacheItem struct {
 	Data      []byte
 	ExpiredAt time.Time
+	IsEmpty   bool // 标记是否为空值缓存
 }
+
+// 空值缓存常量
+const (
+	EmptyResultMarker = "EMPTY_RESULT_MARKER" // 空值标记
+	EmptyResultTTL    = 5 * time.Minute       // 空值缓存TTL - 5分钟，避免频繁穿透
+	NormalCacheTTL    = 60 * time.Minute      // 正常缓存TTL - 60分钟，提高命中率
+)
 
 // CacheStats 缓存统计
 type CacheStats struct {
@@ -36,6 +44,128 @@ type CacheStats struct {
 	ESHits     int64
 	TotalReqs  int64
 	mutex      sync.RWMutex
+}
+
+// CircuitState 熔断器状态
+type CircuitState int
+
+const (
+	CircuitClosed CircuitState = iota // 关闭状态，正常工作
+	CircuitOpen                       // 开启状态，拒绝请求
+	CircuitHalfOpen                   // 半开状态，尝试恢复
+)
+
+// CircuitBreaker Redis熔断器
+type CircuitBreaker struct {
+	mutex           sync.RWMutex
+	state           CircuitState
+	failureCount    int64
+	successCount    int64
+	lastFailureTime time.Time
+	lastSuccessTime time.Time
+	
+	// 配置参数
+	failureThreshold int64         // 失败阈值
+	successThreshold int64         // 半开状态下成功阈值
+	timeout          time.Duration // 熔断超时时间
+}
+
+// NewCircuitBreaker 创建熔断器
+func NewCircuitBreaker(failureThreshold int64, successThreshold int64, timeout time.Duration) *CircuitBreaker {
+	return &CircuitBreaker{
+		state:            CircuitClosed,
+		failureThreshold: failureThreshold,
+		successThreshold: successThreshold,
+		timeout:          timeout,
+	}
+}
+
+// IsOpen 检查熔断器是否开启
+func (cb *CircuitBreaker) IsOpen() bool {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+	
+	if cb.state == CircuitOpen {
+		// 检查是否可以转为半开状态
+		if time.Since(cb.lastFailureTime) > cb.timeout {
+			return false // 可以尝试半开
+		}
+		return true
+	}
+	
+	return false
+}
+
+// CanExecute 检查是否可以执行请求
+func (cb *CircuitBreaker) CanExecute() bool {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	switch cb.state {
+	case CircuitClosed:
+		return true
+	case CircuitOpen:
+		if time.Since(cb.lastFailureTime) > cb.timeout {
+			cb.state = CircuitHalfOpen
+			cb.success_count = 0
+			return true
+		}
+		return false
+	case CircuitHalfOpen:
+		return true
+	}
+}
+
+// RecordSuccess 记录成功
+func (cb *CircuitBreaker) RecordSuccess() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+	
+	cb.lastSuccessTime = time.Now()
+	
+	switch cb.state {
+	case CircuitClosed:
+		cb.failureCount = 0
+	case CircuitHalfOpen:
+		cb.successCount++
+		if cb.successCount >= cb.successThreshold {
+			cb.state = CircuitClosed
+			cb.failureCount = 0
+		}
+	}
+}
+
+// RecordFailure 记录失败
+func (cb *CircuitBreaker) RecordFailure() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+	
+	cb.lastFailureTime = time.Now()
+	cb.failureCount++
+	
+	switch cb.state {
+	case CircuitClosed:
+		if cb.failureCount >= cb.failureThreshold {
+			cb.state = CircuitOpen
+		}
+	case CircuitHalfOpen:
+		cb.state = CircuitOpen
+		cb.successCount = 0
+	}
+}
+
+// GetState 获取当前状态
+func (cb *CircuitBreaker) GetState() CircuitState {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+	return cb.state
+}
+
+// GetStats 获取统计信息
+func (cb *CircuitBreaker) GetStats() (CircuitState, int64, int64, time.Time, time.Time) {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+	return cb.state, cb.failureCount, cb.successCount, cb.lastFailureTime, cb.lastSuccessTime
 }
 
 func (cs *CacheStats) IncrLocalHit() {
@@ -66,12 +196,13 @@ func (cs *CacheStats) GetStats() (local, redis, es, total int64) {
 }
 
 type reviewRepo struct {
-	data       *Data
-	log        *log.Helper
-	ai         *ai.AIClient
-	localCache *lru.Cache
-	cacheMutex sync.RWMutex
-	stats      *CacheStats
+	data            *Data
+	log             *log.Helper
+	ai              *ai.AIClient
+	localCache      *lru.Cache
+	cacheMutex      sync.RWMutex
+	stats           *CacheStats
+	redisBreaker    *CircuitBreaker // Redis熔断器
 }
 
 // NewReviewRepo 新建评论仓库
@@ -81,12 +212,17 @@ func NewReviewRepo(data *Data, logger log.Logger, ai *ai.AIClient) biz.ReviewRep
 		panic(fmt.Sprintf("failed to create local cache: %v", err))
 	}
 	
+	// 创建Redis熔断器
+	// 参数：失败阈值5次，成功阈值3次，超时30秒
+	redisBreaker := NewCircuitBreaker(5, 3, 30*time.Second)
+	
 	return &reviewRepo{
-		data:       data,
-		log:        log.NewHelper(logger),
-		ai:         ai,
-		localCache: cache,
-		stats:      &CacheStats{},
+		data:         data,
+		log:          log.NewHelper(logger),
+		ai:           ai,
+		localCache:   cache,
+		stats:        &CacheStats{},
+		redisBreaker: redisBreaker,
 	}
 }
 
@@ -640,6 +776,13 @@ func (r *reviewRepo) ListReviewByUserID1(ctx context.Context, userID int64, offs
 		return nil, err
 	}
 	
+	// 检查是否为空值缓存
+	if r.isEmptyCache(b) {
+		totalElapsed := time.Since(start)
+		r.log.Infof("🔍 [三级缓存查询] 空值缓存命中 - UserID: %d, 总耗时: %v", userID, totalElapsed)
+		return []*biz.MyReviewInfo{}, nil // 返回空结果
+	}
+	
 	// 数据反序列化
 	parseStart := time.Now()
 	hm := new(types.HitsMetadata)
@@ -692,43 +835,90 @@ func (r *reviewRepo) GetDataBySingleFlight(ctx context.Context, key string, targ
 		if data := r.getFromLocalCache(key); data != nil {
 			r.stats.IncrLocalHit()
 			localElapsed := time.Since(localStart)
+			
+			// 检查是否为空值缓存
+			if r.isEmptyCache(data) {
+				r.log.Infof("🎯 [本地空值缓存命中] key: %s, 耗时: %v, 总耗时: %v", key, localElapsed, time.Since(start))
+				return data, nil
+			}
+			
 			r.log.Infof("🎯 [本地缓存命中] key: %s, 耗时: %v, 总耗时: %v", key, localElapsed, time.Since(start))
 			return data, nil
 		}
 		localElapsed := time.Since(localStart)
 		r.log.Debugf("❌ [本地缓存未命中] key: %s, 查询耗时: %v", key, localElapsed)
 		
-		// 2. 查Redis缓存
+		// 2. 查Redis缓存 (带熔断)
 		redisStart := time.Now()
 		data, err := r.GetDataFromCache(ctx, key)
 		redisElapsed := time.Since(redisStart)
 		
 		if err == nil {
 			r.stats.IncrRedisHit()
+			
+			// 检查是否为空值缓存
+			if r.isEmptyCache(data) {
+				r.log.Infof("🎯 [Redis空值缓存命中] key: %s, 耗时: %v, 总耗时: %v", key, redisElapsed, time.Since(start))
+				r.setToLocalCache(key, data) // 写入本地缓存
+				return data, nil
+			}
+			
 			r.log.Infof("🎯 [Redis缓存命中] key: %s, 耗时: %v, 总耗时: %v", key, redisElapsed, time.Since(start))
-			// 写入本地缓存
-			r.setToLocalCache(key, data)
+			r.setToLocalCache(key, data) // 写入本地缓存
 			return data, nil
 		}
-		r.log.Debugf("❌ [Redis缓存未命中] key: %s, 查询耗时: %v, 错误: %v", key, redisElapsed, err)
 		
-		// 3. 如果redis中没有数据，则从ES中获取数据
-		if errors.Is(err, redis.Nil) {
-			esStart := time.Now()
-			data, err = r.GetDataFromES(ctx, key, target)
-			esElapsed := time.Since(esStart)
-			
-			if err == nil {
-				r.stats.IncrESHit()
-				r.log.Infof("🎯 [ES查询成功] key: %s, 耗时: %v, 总耗时: %v", key, esElapsed, time.Since(start))
-				// 写入本地缓存和Redis
-				r.setToLocalCache(key, data)
-				return data, r.SetCache(ctx, key, data)
-			}
-			r.log.Errorf("❌ [ES查询失败] key: %s, 耗时: %v, 错误: %v", key, esElapsed, err)
-			return nil, err
+		// Redis查询失败的处理
+		isRedisDown := !r.redisBreaker.CanExecute() || !errors.Is(err, redis.Nil)
+		if isRedisDown {
+			r.log.Warnf("⚠️  [Redis降级] Redis不可用，直接查询ES - key: %s, 错误: %v", key, err)
+		} else {
+			r.log.Debugf("❌ [Redis缓存未命中] key: %s, 查询耗时: %v", key, redisElapsed)
 		}
-		// 4. 如果查询redis报错，则返回错误
+		
+		// 3. 查询ES
+		esStart := time.Now()
+		data, err = r.GetDataFromES(ctx, key, target)
+		esElapsed := time.Since(esStart)
+		
+		if err == nil {
+			r.stats.IncrESHit()
+			r.log.Infof("🎯 [ES查询成功] key: %s, 耗时: %v, 总耗时: %v", key, esElapsed, time.Since(start))
+			
+			// 写入本地缓存
+			r.setToLocalCache(key, data)
+			
+			// 尝试写入Redis (如果Redis可用)
+			if !isRedisDown {
+				if setErr := r.SetCache(ctx, key, data); setErr != nil {
+					r.log.Warnf("⚠️  [Redis写入失败] key: %s, 错误: %v", key, setErr)
+				}
+			}
+			
+			return data, nil
+		}
+		
+		// ES查询失败，可能是数据不存在
+		r.log.Warnf("❌ [ES查询失败] key: %s, 耗时: %v, 错误: %v", key, esElapsed, err)
+		
+		// 如果是数据不存在的错误，设置空值缓存防止穿透
+		if r.isDataNotFoundError(err) {
+			r.log.Infof("🔍 [设置空值缓存] 数据不存在，设置空值缓存防穿透 - key: %s", key)
+			emptyData := r.createEmptyCache()
+			
+			// 写入本地空值缓存
+			r.setEmptyToLocalCache(key)
+			
+			// 尝试写入Redis空值缓存
+			if !isRedisDown {
+				if setErr := r.SetCache(ctx, key, emptyData); setErr != nil {
+					r.log.Warnf("⚠️  [Redis空值缓存写入失败] key: %s, 错误: %v", key, setErr)
+				}
+			}
+			
+			return emptyData, nil
+		}
+		
 		return nil, err
 	})
 	if err != nil {
@@ -737,10 +927,40 @@ func (r *reviewRepo) GetDataBySingleFlight(ctx context.Context, key string, targ
 	return v.([]byte), nil
 }
 
-// 读缓存
+// 读缓存 - 集成熔断器
 func (r *reviewRepo) GetDataFromCache(ctx context.Context, key string) ([]byte, error) {
+	// 检查熔断器状态
+	if !r.redisBreaker.CanExecute() {
+		state, failures, _, lastFailure, _ := r.redisBreaker.GetStats()
+		r.log.Warnf("🔴 [Redis熔断] 熔断器阻止请求 - key: %s, 状态: %v, 失败次数: %d, 最后失败: %v", 
+			key, state, failures, lastFailure)
+		return nil, fmt.Errorf("redis circuit breaker is open")
+	}
+	
 	r.log.Debugf("GetDataFromCache, key: %s", key)
-	return r.data.rdb.Get(ctx, key).Bytes()
+	
+	start := time.Now()
+	data, err := r.data.rdb.Get(ctx, key).Bytes()
+	elapsed := time.Since(start)
+	
+	if err != nil {
+		// 记录失败
+		r.redisBreaker.RecordFailure()
+		state, failures, _, _, _ := r.redisBreaker.GetStats()
+		
+		if failures >= 3 { // 连续失败3次开始警告
+			r.log.Warnf("⚠️  [Redis异常] Redis查询失败 - key: %s, 耗时: %v, 错误: %v, 失败次数: %d, 熔断器状态: %v", 
+				key, elapsed, err, failures, state)
+		}
+		
+		return nil, err
+	}
+	
+	// 记录成功
+	r.redisBreaker.RecordSuccess()
+	r.log.Debugf("✅ [Redis成功] key: %s, 耗时: %v", key, elapsed)
+	
+	return data, nil
 }
 
 // 从ES中获取数据，target: store or user
@@ -801,9 +1021,35 @@ func (r *reviewRepo) GetDataFromES(ctx context.Context, key string, target strin
 	return b, nil
 }
 
-// 设置缓存
+// 设置缓存 - 集成熔断器和空值缓存
 func (r *reviewRepo) SetCache(ctx context.Context, key string, value []byte) error {
-	return r.data.rdb.Set(ctx, key, value, time.Second*60).Err()
+	// 检查熔断器状态
+	if !r.redisBreaker.CanExecute() {
+		r.log.Warnf("🔴 [Redis熔断] 熔断器阻止写入 - key: %s", key)
+		return fmt.Errorf("redis circuit breaker is open")
+	}
+	
+	// 判断是否为空值缓存，设置不同的TTL
+	ttl := NormalCacheTTL // 正常缓存60分钟
+	if r.isEmptyCache(value) {
+		ttl = EmptyResultTTL // 空值缓存5分钟
+		r.log.Debugf("🔍 [空值缓存] 设置空值缓存 - key: %s, TTL: %v", key, ttl)
+	}
+	
+	start := time.Now()
+	err := r.data.rdb.Set(ctx, key, value, ttl).Err()
+	elapsed := time.Since(start)
+	
+	if err != nil {
+		r.redisBreaker.RecordFailure()
+		r.log.Warnf("❌ [Redis写入失败] key: %s, 耗时: %v, 错误: %v", key, elapsed, err)
+		return err
+	}
+	
+	r.redisBreaker.RecordSuccess()
+	r.log.Debugf("✅ [Redis写入成功] key: %s, 耗时: %v, TTL: %v", key, elapsed, ttl)
+	
+	return nil
 }
 
 // 本地缓存读取
@@ -822,16 +1068,39 @@ func (r *reviewRepo) getFromLocalCache(key string) []byte {
 	return nil
 }
 
+// 检查是否为空值缓存
+func (r *reviewRepo) isEmptyCache(data []byte) bool {
+	return string(data) == EmptyResultMarker
+}
+
+// 创建空值缓存
+func (r *reviewRepo) createEmptyCache() []byte {
+	return []byte(EmptyResultMarker)
+}
+
 // 本地缓存写入
 func (r *reviewRepo) setToLocalCache(key string, data []byte) {
 	r.cacheMutex.Lock()
 	defer r.cacheMutex.Unlock()
 	
+	// 判断是否为空值缓存，设置不同的TTL
+	isEmpty := r.isEmptyCache(data)
+	ttl := NormalCacheTTL
+	if isEmpty {
+		ttl = EmptyResultTTL
+	}
+	
 	item := &CacheItem{
 		Data:      data,
-		ExpiredAt: time.Now().Add(30 * time.Second), // 本地缓存30秒
+		ExpiredAt: time.Now().Add(ttl),
+		IsEmpty:   isEmpty,
 	}
 	r.localCache.Add(key, item)
+}
+
+// 设置空值缓存
+func (r *reviewRepo) setEmptyToLocalCache(key string) {
+	r.setToLocalCache(key, r.createEmptyCache())
 }
 
 // GetCacheStats 获取缓存统计信息
@@ -847,6 +1116,74 @@ func (r *reviewRepo) ResetCacheStats() {
 	r.stats.RedisHits = 0
 	r.stats.ESHits = 0
 	r.stats.TotalReqs = 0
+}
+
+// isDataNotFoundError 判断是否为数据不存在的错误
+func (r *reviewRepo) isDataNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	errStr := err.Error()
+	// 常见的数据不存在错误模式
+	notFoundPatterns := []string{
+		"not found",
+		"no documents",
+		"empty result",
+		"no data",
+		"document not found",
+	}
+	
+	for _, pattern := range notFoundPatterns {
+		if strings.Contains(strings.ToLower(errStr), pattern) {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// GetCircuitBreakerStats 获取熔断器统计信息
+func (r *reviewRepo) GetCircuitBreakerStats() (CircuitState, int64, int64, time.Time, time.Time) {
+	return r.redisBreaker.GetStats()
+}
+
+// GetCacheHealthStatus 获取缓存健康状态
+func (r *reviewRepo) GetCacheHealthStatus() map[string]interface{} {
+	state, failures, successes, lastFailure, lastSuccess := r.redisBreaker.GetStats()
+	local, redis, es, total := r.GetCacheStats()
+	
+	var localHitRate, redisHitRate, totalHitRate float64
+	if total > 0 {
+		localHitRate = float64(local) / float64(total) * 100
+		redisHitRate = float64(redis) / float64(total) * 100
+		totalHitRate = float64(local+redis) / float64(total) * 100
+	}
+	
+	return map[string]interface{}{
+		"cache_stats": map[string]interface{}{
+			"local_hits":      local,
+			"redis_hits":      redis,
+			"es_hits":         es,
+			"total_requests":  total,
+			"local_hit_rate":  fmt.Sprintf("%.2f%%", localHitRate),
+			"redis_hit_rate":  fmt.Sprintf("%.2f%%", redisHitRate),
+			"total_hit_rate":  fmt.Sprintf("%.2f%%", totalHitRate),
+		},
+		"redis_circuit_breaker": map[string]interface{}{
+			"state":           state,
+			"failure_count":   failures,
+			"success_count":   successes,
+			"last_failure":    lastFailure,
+			"last_success":    lastSuccess,
+			"is_healthy":      state == CircuitClosed,
+		},
+		"local_cache": map[string]interface{}{
+			"size": r.localCache.Len(),
+			"capacity": 1000,
+			"usage_rate": fmt.Sprintf("%.2f%%", float64(r.localCache.Len())/1000*100),
+		},
+	}
 }
 
 // listReviewsByStatusFromES directly queries Elasticsearch for reviews by their status.
